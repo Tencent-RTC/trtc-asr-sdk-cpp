@@ -3,7 +3,7 @@
 // Reads a PCM file (16kHz 16bit mono) and streams it in 200ms chunks.
 //
 // Credentials come from environment variables:
-//   TRTC_APP_ID, TRTC_SDK_APP_ID, TRTC_SECRET_KEY
+//   TRTC_ASR_APP_ID, TRTC_ASR_SDK_APP_ID, TRTC_ASR_SECRET_KEY
 //
 // Usage: ./realtime_asr <audio.pcm> [engine_model_type]
 
@@ -80,8 +80,8 @@ int main(int argc, char** argv) {
   std::string path = argv[1];
   std::string engine = argc > 2 ? argv[2] : "16k_zh_en";
 
-  trtc_asr::Credential credential(EnvInt("TRTC_APP_ID"), EnvInt("TRTC_SDK_APP_ID"),
-                                  EnvStr("TRTC_SECRET_KEY"));
+  trtc_asr::Credential credential(EnvInt("TRTC_ASR_APP_ID"), EnvInt("TRTC_ASR_SDK_APP_ID"),
+                                  EnvStr("TRTC_ASR_SECRET_KEY"));
 
   Printer listener;
   trtc_asr::SpeechRecognizer recognizer(credential, engine, &listener);

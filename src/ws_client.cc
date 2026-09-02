@@ -373,17 +373,27 @@ int WsClient::ReadExact(uint8_t* buf, size_t n, int64_t deadline_ms) {
       off += take;
       continue;
     }
-    int remaining = static_cast<int>(deadline_ms - NowMs());
-    if (remaining <= 0) return 0;
-    int prc = PollFd(fd_, POLLIN, remaining);
-    if (prc == 0) return 0;
-    if (prc < 0) return -1;
+    // TLS records already absorbed into the SSL buffer (e.g. data that
+    // arrived together with the handshake response) are not visible to
+    // poll(); read them without polling first.
+    if (ssl_ == nullptr || SSL_pending(ssl_) == 0) {
+      int remaining = static_cast<int>(deadline_ms - NowMs());
+      if (remaining <= 0) return 0;
+      int prc = PollFd(fd_, POLLIN, remaining);
+      if (prc == 0) return 0;
+      if (prc < 0) return -1;
+    } else {
+      int remaining = static_cast<int>(deadline_ms - NowMs());
+      if (remaining <= 0) return 0;
+    }
     ssize_t rc;
     if (ssl_ != nullptr) {
       rc = SSL_read(ssl_, buf + off, static_cast<int>(n - off));
       if (rc <= 0) {
         int ssl_err = SSL_get_error(ssl_, rc);
         if (ssl_err == SSL_ERROR_WANT_READ) continue;
+        last_read_err_ = "SSL_read failed, ssl_err=" + std::to_string(ssl_err) +
+                         ", errno=" + std::to_string(errno);
         return -1;
       }
     } else {
@@ -400,12 +410,27 @@ int WsClient::ReadExact(uint8_t* buf, size_t n, int64_t deadline_ms) {
   return 1;
 }
 
-int WsClient::Read(WsFrame* out, int timeout_ms) {
+int WsClient::Read(WsFrame* out, int timeout_ms, std::string* err) {
   int64_t deadline = NowMs() + timeout_ms;
+  auto fill_err = [&](const char* what) {
+    if (err != nullptr) {
+      *err = what;
+      if (ssl_ != nullptr) {
+        *err += ", pending=" + std::to_string(SSL_pending(ssl_));
+      }
+      *err += ", errno=" + std::to_string(errno) + " (" + std::strerror(errno) + ")";
+    }
+  };
   while (true) {
     uint8_t head[2];
     int rc = ReadExact(head, 2, deadline);
-    if (rc != 1) return rc;
+    if (rc != 1) {
+      if (rc < 0) {
+        fill_err("read frame header failed");
+        if (err != nullptr && !last_read_err_.empty()) *err += "; " + last_read_err_;
+      }
+      return rc;
+    }
 
     out->fin = (head[0] & 0x80) != 0;
     out->opcode = head[0] & 0x0F;
@@ -413,22 +438,36 @@ int WsClient::Read(WsFrame* out, int timeout_ms) {
     uint64_t len = head[1] & 0x7F;
     if (len == 126) {
       uint8_t ext[2];
-      if (ReadExact(ext, 2, deadline) != 1) return -1;
+      if (ReadExact(ext, 2, deadline) != 1) {
+        fill_err("read extended length failed");
+        return -1;
+      }
       len = (static_cast<uint64_t>(ext[0]) << 8) | ext[1];
     } else if (len == 127) {
       uint8_t ext[8];
-      if (ReadExact(ext, 8, deadline) != 1) return -1;
+      if (ReadExact(ext, 8, deadline) != 1) {
+        fill_err("read extended length failed");
+        return -1;
+      }
       len = 0;
       for (int i = 0; i < 8; i++) len = (len << 8) | ext[i];
     }
-    if (len > 64 * 1024 * 1024) return -1;  // sanity bound
+    if (len > 64 * 1024 * 1024) {
+      fill_err("frame length exceeds sanity bound");
+      return -1;
+    }
 
     uint8_t mask_key[4] = {0};
-    if (masked && ReadExact(mask_key, 4, deadline) != 1) return -1;
+    if (masked && ReadExact(mask_key, 4, deadline) != 1) {
+      fill_err("read mask key failed");
+      return -1;
+    }
 
     out->payload.resize(len);
     if (len > 0 &&
         ReadExact(reinterpret_cast<uint8_t*>(out->payload.data()), len, deadline) != 1) {
+      fill_err("read payload failed");
+      if (err != nullptr && !last_read_err_.empty()) *err += "; " + last_read_err_;
       return -1;
     }
     if (masked) {

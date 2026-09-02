@@ -356,7 +356,8 @@ void SpeechRecognizer::ReadLoopInner(std::shared_ptr<internal::RecognizerSharedS
 
     while (true) {
       internal::WsFrame frame;
-      int rc = conn->Read(&frame, kReadPollMs);
+      std::string read_err;
+      int rc = conn->Read(&frame, kReadPollMs, &read_err);
       if (rc == 0) {
         if (shared->state.load() == S::kStateStopped_) return;
         continue;
@@ -366,7 +367,9 @@ void SpeechRecognizer::ReadLoopInner(std::shared_ptr<internal::RecognizerSharedS
         // Terminal: finish the lifecycle before notifying, so a Stop/Write
         // from inside OnFail sees the stopped state.
         shared->Finish();
-        SafeOnFail(nullptr, ASRError(kErrReadFailed, "read message failed"));
+        SafeOnFail(nullptr, ASRError(kErrReadFailed,
+                                     "read message failed" +
+                                         (read_err.empty() ? "" : ": " + read_err)));
         return;
       }
 

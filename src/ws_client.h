@@ -51,8 +51,9 @@ class WsClient {
 
   /// Reads the next message.
   /// Returns 1 on a message, 0 on timeout, -1 on error/connection closed.
-  /// Ping frames are answered automatically and skipped.
-  int Read(WsFrame* out, int timeout_ms);
+  /// Ping frames are answered automatically and skipped. On -1, err carries
+  /// details (TLS error code / errno) when available.
+  int Read(WsFrame* out, int timeout_ms, std::string* err = nullptr);
 
   /// Force-closes the connection, unblocking any in-flight Read/Send.
   void Close();
@@ -72,6 +73,7 @@ class WsClient {
   std::vector<uint8_t> read_buf_;
   std::mutex write_mu_;
   int write_timeout_ms_ = 30000;
+  std::string last_read_err_;
 };
 
 /// Generates a random UUIDv4 string (also used for voice_id / RequestId).

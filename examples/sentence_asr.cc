@@ -1,7 +1,7 @@
 // One-shot sentence recognition example (audio <= 60s / 3MB).
 //
 // Credentials come from environment variables:
-//   TRTC_APP_ID, TRTC_SDK_APP_ID, TRTC_SECRET_KEY
+//   TRTC_ASR_APP_ID, TRTC_ASR_SDK_APP_ID, TRTC_ASR_SECRET_KEY
 //
 // Usage: ./sentence_asr <audio.pcm> [format=pcm] [engine=16k_zh_en]
 
@@ -52,8 +52,8 @@ int main(int argc, char** argv) {
   }
   std::vector<uint8_t> data(std::istreambuf_iterator<char>(file), {});
 
-  trtc_asr::Credential credential(EnvInt("TRTC_APP_ID"), EnvInt("TRTC_SDK_APP_ID"),
-                                  EnvStr("TRTC_SECRET_KEY"));
+  trtc_asr::Credential credential(EnvInt("TRTC_ASR_APP_ID"), EnvInt("TRTC_ASR_SDK_APP_ID"),
+                                  EnvStr("TRTC_ASR_SECRET_KEY"));
   trtc_asr::SentenceRecognizer recognizer(credential);
 
   try {
