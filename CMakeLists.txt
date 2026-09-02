@@ -143,6 +143,7 @@ if(TRTC_ASR_BUILD_TESTS)
     tests/file_recognizer_test.cc
     tests/speech_recognizer_test.cc
     tests/sdkinfo_test.cc
+    tests/site_test.cc
     tests/mock_servers.cc
   )
   target_include_directories(trtc_asr_tests PRIVATE

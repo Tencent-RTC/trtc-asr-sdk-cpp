@@ -118,6 +118,7 @@ class Printer : public trtc_asr::SpeechRecognitionListener {
 };
 
 trtc_asr::Credential credential(app_id, sdk_app_id, "your-sdk-secret-key");
+// credential.set_site(trtc_asr::kSiteIntl); // 国际站；须在构造识别器之前调用
 Printer listener;
 trtc_asr::SpeechRecognizer recognizer(credential, "16k_zh", &listener);
 

@@ -138,7 +138,7 @@ json ParseApiEnvelope(const std::string& body, const char* request_path) {
 }  // namespace
 
 FileRecognizer::FileRecognizer(const Credential& credential)
-    : credential_(credential), endpoint_(kEndpoint) {}
+    : credential_(credential), endpoint_() {}
 
 std::string FileRecognizer::CreateTask(const CreateRecTaskRequest& req) {
   ValidateCreateRequest(req);
@@ -284,7 +284,8 @@ std::string FileRecognizer::DoRequest(const std::string& path,
   // request is authenticated by the UserSig header, so extra query
   // parameters are safe.
   std::string req_url =
-      endpoint_ + path + "?AppId=" + credential_.app_id_str() +
+      ResolveHTTPEndpoint(endpoint_, credential_.site()) + path +
+      "?AppId=" + credential_.app_id_str() +
       "&Secretid=" + credential_.app_id_str() + "&RequestId=" + request_id +
       "&Timestamp=" +
       std::to_string(std::chrono::duration_cast<std::chrono::seconds>(

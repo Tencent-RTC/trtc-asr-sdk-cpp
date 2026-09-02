@@ -73,7 +73,7 @@ SpeechRecognizer::SpeechRecognizer(const Credential& credential,
                                    SpeechRecognitionListener* listener)
     : credential_(credential),
       listener_(listener),
-      endpoint_(kEndpoint),
+      endpoint_(),
       engine_model_type_(std::move(engine_model_type)) {}
 
 SpeechRecognizer::~SpeechRecognizer() {
@@ -194,8 +194,9 @@ void SpeechRecognizer::Connect() {
 
   std::string query = p.BuildQueryStringWithSignature(user_sig);
   // URL path uses the Tencent Cloud AppID (not SdkAppID).
+  std::string base = ResolveWSEndpoint(endpoint_, credential_.site());
   std::string ws_url =
-      endpoint_ + "/asr/v2/" + std::to_string(credential_.app_id()) + "?" + query;
+      base + "/asr/v2/" + std::to_string(credential_.app_id()) + "?" + query;
 
   std::string err;
   auto conn = internal::WsClient::Connect(ws_url, kHandshakeTimeoutMs, &err);
