@@ -79,7 +79,7 @@ share/doc/trtc-asr-sdk-cpp/   README
 使用时把解包目录传给 `CMAKE_PREFIX_PATH` 即可：
 
 ```bash
-cmake -B build -DCMAKE_PREFIX_PATH=/path/to/trtc-asr-sdk-cpp-0.1.0-linux-x86_64-static
+cmake -B build -DCMAKE_PREFIX_PATH=/path/to/trtc-asr-sdk-cpp-1.0.0-linux-x86_64-static
 ```
 
 打包脚本在生成压缩包前，会用一个独立的最小工程通过 `find_package` 链接并运行产物，
