@@ -1,0 +1,11 @@
+prefix=@CMAKE_INSTALL_PREFIX@
+exec_prefix=${prefix}
+libdir=${prefix}/@CMAKE_INSTALL_LIBDIR@
+includedir=${prefix}/@CMAKE_INSTALL_INCLUDEDIR@
+
+Name: trtc_asr
+Description: Tencent TRTC ASR SDK for C++
+Version: @PROJECT_VERSION@
+Requires: openssl zlib libcurl
+Libs: -L${libdir} -ltrtc_asr
+Cflags: -I${includedir}

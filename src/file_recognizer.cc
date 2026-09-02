@@ -4,6 +4,7 @@
 
 #include "http_client.h"
 #include "json_helper.h"
+#include "sdkinfo.h"
 #include "trtc_asr/params.h"
 #include "trtc_asr/usersig.h"
 #include "ws_client.h"  // GenerateUuid
@@ -279,13 +280,17 @@ std::string FileRecognizer::DoRequest(const std::string& path,
     }
   }
 
+  // Shared by CreateRecTask and DescribeTaskStatus, so both report. The
+  // request is authenticated by the UserSig header, so extra query
+  // parameters are safe.
   std::string req_url =
       endpoint_ + path + "?AppId=" + credential_.app_id_str() +
       "&Secretid=" + credential_.app_id_str() + "&RequestId=" + request_id +
       "&Timestamp=" +
       std::to_string(std::chrono::duration_cast<std::chrono::seconds>(
                          std::chrono::system_clock::now().time_since_epoch())
-                         .count());
+                         .count()) +
+      "&" + internal::SdkReportQuery();
 
   std::string err;
   internal::HttpResponse http_resp = internal::HttpPost(

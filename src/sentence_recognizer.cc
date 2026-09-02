@@ -4,6 +4,7 @@
 
 #include "http_client.h"
 #include "json_helper.h"
+#include "sdkinfo.h"
 #include "trtc_asr/usersig.h"
 #include "ws_client.h"  // GenerateUuid
 
@@ -91,13 +92,16 @@ SentenceRecognitionResult SentenceRecognizer::Recognize(
     }
   }
 
+  // The SDK identification fragment is appended to the query; the request is
+  // authenticated by the UserSig header, so extra parameters are safe.
   std::string req_url =
       endpoint_ + "/v1/SentenceRecognition?AppId=" + credential_.app_id_str() +
       "&Secretid=" + credential_.app_id_str() + "&RequestId=" + request_id +
       "&Timestamp=" +
       std::to_string(std::chrono::duration_cast<std::chrono::seconds>(
                          std::chrono::system_clock::now().time_since_epoch())
-                         .count());
+                         .count()) +
+      "&" + internal::SdkReportQuery();
 
   std::string body = SerializeRequest(req);
 

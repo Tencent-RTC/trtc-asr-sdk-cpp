@@ -5,6 +5,7 @@
 #include <random>
 
 #include "json_helper.h"
+#include "sdkinfo.h"
 
 namespace trtc_asr {
 
@@ -61,6 +62,12 @@ std::map<std::string, std::string> SignatureParams::ToMap() const {
   m["voice_id"] = voice_id;
   m["voice_format"] = std::to_string(voice_format);
   m["needvad"] = std::to_string(need_vad);
+
+  // SDK self-identification for server-side diagnostics. Not part of the
+  // signature (the signature is the UserSig), so it is safe to append.
+  for (const auto& [k, v] : internal::SdkReportParams()) {
+    m[k] = v;
+  }
 
   if (sdk_app_id > 0) m["sdkappid"] = std::to_string(sdk_app_id);
   if (!hotword_id.empty()) m["hotword_id"] = hotword_id;

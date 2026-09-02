@@ -24,12 +24,75 @@ cmake --build build -j
 - `build/realtime_asr` / `sentence_asr` / `file_asr` — 示例程序
 - `build/trtc_asr_tests` — 测试（googletest 由 CMake FetchContent 自动拉取）
 
-集成方式（CMake）：
+构建选项（作为顶层项目时示例与测试默认开启，被 `add_subdirectory` 引入时默认关闭）：
+
+| 选项 | 默认值 | 说明 |
+| --- | --- | --- |
+| `TRTC_ASR_BUILD_SHARED` | `OFF` | 构建动态库而非静态库 |
+| `TRTC_ASR_BUILD_EXAMPLES` | 顶层为 `ON` | 构建示例程序 |
+| `TRTC_ASR_BUILD_TESTS` | 顶层为 `ON` | 构建测试（会下载 googletest） |
+| `TRTC_ASR_INSTALL` | 顶层为 `ON` | 生成 install 规则 |
+
+## 集成
+
+### 方式一：源码集成（推荐）
 
 ```cmake
 add_subdirectory(path/to/trtc-asr-sdk-cpp)
-target_link_libraries(your_app PRIVATE trtc_asr)
+target_link_libraries(your_app PRIVATE trtc_asr::trtc_asr)
 ```
+
+### 方式二：安装后 find_package
+
+```bash
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local
+cmake --build build -j
+cmake --install build
+```
+
+```cmake
+find_package(trtc_asr 0.1 REQUIRED)
+target_link_libraries(your_app PRIVATE trtc_asr::trtc_asr)
+```
+
+也提供 pkg-config：`pkg-config --cflags --libs trtc_asr`。
+
+### 方式三：使用预编译包
+
+```bash
+./scripts/package.sh              # 同时产出静态与动态包
+./scripts/package.sh --static     # 仅静态
+./scripts/package.sh --shared --output /tmp/out
+```
+
+脚本会在 `dist/` 下生成
+`trtc-asr-sdk-cpp-<版本>-<系统>-<架构>-<static|shared>.tar.gz`，解包后目录结构为：
+
+```
+include/trtc_asr/*.h          公共头文件
+lib/libtrtc_asr.{a,so,dylib}  库文件
+lib/cmake/trtc_asr/           CMake 包配置，供 find_package 使用
+lib/pkgconfig/trtc_asr.pc     pkg-config 配置
+share/doc/trtc-asr-sdk-cpp/   README
+```
+
+使用时把解包目录传给 `CMAKE_PREFIX_PATH` 即可：
+
+```bash
+cmake -B build -DCMAKE_PREFIX_PATH=/path/to/trtc-asr-sdk-cpp-0.1.0-linux-x86_64-static
+```
+
+打包脚本在生成压缩包前，会用一个独立的最小工程通过 `find_package` 链接并运行产物，
+确保头文件、导出目标和依赖传递都是完整可用的。
+
+### 二进制兼容性说明
+
+公共接口使用了 `std::string`、`std::vector`、`std::optional` 等标准库类型，因此预编译
+产物与调用方需使用**同一套编译器与标准库**（相同的 libstdc++/libc++ ABI、相同的
+C++ 标准）。跨编译器场景请使用源码集成方式。
+
+SDK 版本可在编译期通过 `trtc_asr/version.h` 的 `TRTC_ASR_VERSION_STRING` 获取，
+CMake 工程版本与打包产物版本均以该头文件为唯一来源。
 
 ## 快速开始
 
