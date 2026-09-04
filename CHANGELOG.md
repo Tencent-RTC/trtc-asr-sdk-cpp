@@ -12,6 +12,11 @@
 - 仓库迁移至 `github.com/Tencent-RTC/trtc-asr-sdk-cpp`，功能与 API 无任何变化。
   旧仓库保留 `v1.0.0` 并归档，不再更新。
 
+### 修复
+
+- `src/usersig.cc` 补充 `#include <ctime>`：`std::time` 不再依赖传递包含，
+  修复 GCC/libstdc++（Linux）下的编译失败。
+
 ## [1.0.0] - 2026-09-02
 
 首个正式版本。

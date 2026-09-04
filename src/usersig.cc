@@ -1,6 +1,7 @@
 #include "trtc_asr/usersig.h"
 
 #include <cstring>
+#include <ctime>
 #include <stdexcept>
 #include <vector>
 #include <zlib.h>
