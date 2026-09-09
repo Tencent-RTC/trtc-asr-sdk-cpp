@@ -392,6 +392,21 @@ int WsClient::ReadExact(uint8_t* buf, size_t n, int64_t deadline_ms) {
       if (rc <= 0) {
         int ssl_err = SSL_get_error(ssl_, rc);
         if (ssl_err == SSL_ERROR_WANT_READ) continue;
+        // The peer can send its close_notify while application data is still
+        // buffered inside the SSL object (a frame that fully arrived
+        // together with the close). SSL_read reports 0 for the close_notify
+        // first, so drain the buffered bytes before treating this as EOF —
+        // otherwise a complete frame is reported as a truncated read.
+        if (ssl_err == SSL_ERROR_ZERO_RETURN && SSL_pending(ssl_) > 0) {
+          int pending = SSL_pending(ssl_);
+          int want = static_cast<int>(std::min<size_t>(n - off,
+                                                       static_cast<size_t>(pending)));
+          int got = SSL_read(ssl_, buf + off, want);
+          if (got > 0) {
+            off += static_cast<size_t>(got);
+            continue;
+          }
+        }
         last_read_err_ = "SSL_read failed, ssl_err=" + std::to_string(ssl_err) +
                          ", errno=" + std::to_string(errno);
         return -1;

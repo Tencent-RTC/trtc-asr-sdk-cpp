@@ -77,6 +77,7 @@ add_library(trtc_asr ${_trtc_asr_lib_type}
   src/speech_recognizer.cc
   src/sentence_recognizer.cc
   src/file_recognizer.cc
+  src/v3.cc
 )
 add_library(trtc_asr::trtc_asr ALIAS trtc_asr)
 
@@ -109,6 +110,12 @@ target_link_libraries(trtc_asr
 
 if(TRTC_ASR_BUILD_EXAMPLES)
   add_executable(realtime_asr examples/realtime_asr.cc)
+  add_executable(v3_realtime_asr examples/v3_realtime_asr.cc)
+  target_link_libraries(v3_realtime_asr PRIVATE trtc_asr)
+  add_executable(v3_sentence_asr examples/v3_sentence_asr.cc)
+  target_link_libraries(v3_sentence_asr PRIVATE trtc_asr)
+  add_executable(v3_file_asr examples/v3_file_asr.cc)
+  target_link_libraries(v3_file_asr PRIVATE trtc_asr)
   target_link_libraries(realtime_asr PRIVATE trtc_asr)
 
   add_executable(sentence_asr examples/sentence_asr.cc)
@@ -145,6 +152,7 @@ if(TRTC_ASR_BUILD_TESTS)
     tests/sdkinfo_test.cc
     tests/site_test.cc
     tests/mock_servers.cc
+    tests/v3_test.cc
   )
   target_include_directories(trtc_asr_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/tests
