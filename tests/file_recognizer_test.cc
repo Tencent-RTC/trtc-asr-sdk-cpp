@@ -249,7 +249,7 @@ TEST(FileRecognizer, DescribeTaskStatusSuccessWithDetails) {
     EXPECT_EQ(body["RecTaskId"], "task-123");
     return MockHttpResponse{
         200,
-        R"({"Response":{"Data":{"RecTaskId":"task-123","Status":2,"StatusStr":"success","Progress":100,"Result":"今天天气不错。","AudioDuration":2.38,"ResultDetail":[{"FinalSentence":"今天天气不错。","SliceSentence":"今天 天气 不错","StartMs":200,"EndMs":1380,"WordsNum":1,"SpeechSpeed":2.0,"SpeakerId":1,"SpeakerRoleName":"teacher","ChannelId":0,"Language":"zh","Words":[{"Word":"今天","OffsetStartMs":200,"OffsetEndMs":500}]}]},"RequestId":"req-123"}})"};
+        R"({"Response":{"Data":{"RecTaskId":"task-123","Status":2,"StatusStr":"success","Progress":100,"Result":"今天天气不错。","AudioDuration":2.38,"ResultDetail":[{"FinalSentence":"今天天气不错。","SliceSentence":"今天 天气 不错","StartMs":200,"EndMs":1380,"WordsNum":1,"SpeechSpeed":2.0,"SpeakerId":1,"SpeakerRoleName":"teacher","ChannelId":0,"Language":"zh","Words":[{"Word":"今天","StartTime":200,"EndTime":500}]}]},"RequestId":"req-123"}})"};
   });
 
   FileRecognizer r(TestCredential());
@@ -267,6 +267,26 @@ TEST(FileRecognizer, DescribeTaskStatusSuccessWithDetails) {
   EXPECT_EQ(detail.language, "zh");
   ASSERT_EQ(detail.words.size(), 1);
   EXPECT_EQ(detail.words[0].word, "今天");
+  EXPECT_EQ(detail.words[0].offset_start_ms, 200);
+  EXPECT_EQ(detail.words[0].offset_end_ms, 500);
+}
+
+TEST(FileRecognizer, DescribeTaskStatusAcceptsOffsetSpelling) {
+  MockHttpServer server([](const trtc_asr_test::CapturedHttpRequest&) {
+    return MockHttpResponse{
+        200,
+        R"({"Response":{"Data":{"RecTaskId":"task-2","Status":2,"StatusStr":"success","ResultDetail":[{"FinalSentence":"你好","Words":[{"Word":"你","OffsetStartMs":120,"OffsetEndMs":640}]}]},"RequestId":"req-2"}})"};
+  });
+
+  FileRecognizer r(TestCredential());
+  r.SetEndpoint(server.Url());
+
+  auto status = r.DescribeTaskStatus("task-2");
+  ASSERT_EQ(status.result_detail.size(), 1);
+  const auto& words = status.result_detail[0].words;
+  ASSERT_EQ(words.size(), 1);
+  EXPECT_EQ(words[0].offset_start_ms, 120);
+  EXPECT_EQ(words[0].offset_end_ms, 640);
 }
 
 TEST(FileRecognizer, DescribeTaskStatusTaskFailedFields) {

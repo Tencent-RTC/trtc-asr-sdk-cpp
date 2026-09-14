@@ -14,6 +14,16 @@ namespace {
 
 using nlohmann::json;
 
+/// Reads the first present key, so an explicit zero in the primary key is not
+/// overridden by the fallback.
+int64_t PickInt(const json& j, const char* primary, const char* fallback) {
+  auto it = j.find(primary);
+  if (it != j.end() && !it->is_null()) return it->get<int64_t>();
+  it = j.find(fallback);
+  if (it != j.end() && !it->is_null()) return it->get<int64_t>();
+  return 0;
+}
+
 /// Serializes the request with Go's omitempty semantics: zero ints and empty
 /// strings/containers are omitted; ChannelNum/ResTextFormat/SourceType are
 /// always sent; VadLevel/NoiseThreshold (optional) are sent when set.
@@ -84,8 +94,10 @@ SentenceDetail ParseSentenceDetail(const json& j) {
     for (const auto& w : j["Words"]) {
       SentenceWords word;
       word.word = w.value("Word", "");
-      word.offset_start_ms = w.value("OffsetStartMs", (int64_t)0);
-      word.offset_end_ms = w.value("OffsetEndMs", (int64_t)0);
+      // The server spells the offsets StartTime / EndTime; the older
+      // OffsetStartMs / OffsetEndMs spelling is accepted as a fallback.
+      word.offset_start_ms = PickInt(w, "StartTime", "OffsetStartMs");
+      word.offset_end_ms = PickInt(w, "EndTime", "OffsetEndMs");
       out.words.push_back(std::move(word));
     }
   }

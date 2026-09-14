@@ -22,6 +22,10 @@ inline constexpr int kTaskStatusSuccess = 2;
 inline constexpr int kTaskStatusFailed = 3;
 
 /// Word-level timing within a sentence.
+///
+/// Offsets are milliseconds relative to the start of the audio. On the wire
+/// the server spells them StartTime / EndTime; the older OffsetStartMs /
+/// OffsetEndMs spelling is accepted as a fallback.
 struct SentenceWords {
   std::string word;
   int64_t offset_start_ms = 0;
