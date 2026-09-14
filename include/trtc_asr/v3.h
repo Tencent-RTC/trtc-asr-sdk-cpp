@@ -369,6 +369,11 @@ class SentenceRecognizer {
   void SetTimeout(std::chrono::seconds timeout) { timeout_ = timeout; }
 
   TranscribeResponse Recognize(const TranscribeRequest& req);
+  /// Recognizes local audio data with a pre-configured request: data,
+  /// data_len and source_type are filled in from `data`, everything else
+  /// (engine, language, word_info …) comes from `req`.
+  TranscribeResponse RecognizeDataWithOptions(const std::vector<uint8_t>& data,
+                                              TranscribeRequest* req);
   /// Recognizes local audio data (raw bytes; base64 is applied internally).
   TranscribeResponse RecognizeData(const std::vector<uint8_t>& data,
                                    const std::string& voice_format,
@@ -396,6 +401,10 @@ class FileRecognizer {
   void SetTimeout(std::chrono::seconds timeout) { timeout_ = timeout; }
 
   std::string CreateTask(const CreateTranscriptionRequest& req);
+  /// Submits local audio data with a pre-configured request: data, data_len
+  /// and source_type are filled in from `data`.
+  std::string CreateTaskFromDataWithOptions(const std::vector<uint8_t>& data,
+                                            CreateTranscriptionRequest* req);
   /// Submits local audio data (raw bytes; base64 is applied internally).
   std::string CreateTaskFromData(const std::vector<uint8_t>& data,
                                  const std::string& engine_model_type);

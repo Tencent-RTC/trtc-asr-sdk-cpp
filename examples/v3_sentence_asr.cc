@@ -30,7 +30,18 @@ int main(int argc, char** argv) {
     return 1;
   }
   const std::string path = argc > 1 ? argv[1] : "audio.pcm";
-  const std::string engine = argc > 2 ? argv[2] : "16k_zh_en";
+  if (argc <= 2) {
+    std::cerr << "error: engine argument is required (engine model type, e.g. bigmodel)\n";
+    return 2;
+  }
+  const std::string engine = argv[2];
+  // Empty lang falls back to server-side language detection.
+  std::string lang = argc > 3 ? argv[3] : "";
+  // The bigmodel engine is best used with an explicit language; every other
+  // engine falls back to server-side detection unless lang is given.
+  if (lang.empty() && engine == "bigmodel") {
+    lang = "zh";
+  }
 
   // v3 credentials need only SdkAppID + SecretKey (no Tencent Cloud APPID).
   trtc_asr::v3::SentenceRecognizer recognizer(
@@ -45,7 +56,13 @@ int main(int argc, char** argv) {
                                   std::istreambuf_iterator<char>());
 
   try {
-    auto resp = recognizer.RecognizeData(data, "pcm", engine);
+    trtc_asr::v3::TranscribeRequest req;
+    req.engine_model_type = engine;
+    req.voice_format = "pcm";
+    if (!lang.empty()) {
+      req.language = lang;
+    }
+    auto resp = recognizer.RecognizeDataWithOptions(data, &req);
     std::cout << "Result: " << resp.result << "\n";
     std::cout << "Duration: " << resp.audio_duration << " ms  RequestId: " << resp.request_id
               << "\n";

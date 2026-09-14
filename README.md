@@ -62,7 +62,7 @@ WebSocket 建连后 **3 秒内**发送首帧 JSON：
 {
   "type": "start",
   "auth": {"sdkappid": "1400000001", "usersig": "eJw..."},
-  "params": {"engine_model_type": "16k_zh_en", "voice_format": 1, "needvad": 1}
+  "params": {"engine_model_type": "bigmodel", "language": "zh", "voice_format": 1, "needvad": 1}
 }
 ```
 
@@ -128,7 +128,7 @@ sequenceDiagram
 | 参数 | 类型 | 默认 | 说明 |
 |------|------|------|------|
 | `voice_id` | string | 取 URL | 流唯一标识（≤128 字符），与 URL 一致或省略 |
-| `engine_model_type` | string | `16k_zh_en` | 引擎模型 |
+| `engine_model_type` | string | **必填** | 引擎模型，无默认值，必填；示例取 `bigmodel`（推荐，配 `language`） |
 | `language` | string | 空 | 识别语言（`zh`/`en`/`ja`…），空=自动检测 |
 | `voice_format` | int | `1` | 音频格式：`1`pcm/`4`speex/`6`silk/`8`mp3/`10`opus/`11`ogg/`12`wav/`14`m4a/`16`aac |
 | `input_sample_rate` | int | 不传 | 仅 `8000`：声明 8k PCM 输入，配 16k 引擎升采样 |
@@ -181,7 +181,7 @@ sequenceDiagram
 
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| `engine_model_type` | string | 是 | 引擎模型 |
+| `engine_model_type` | string | 是 | 引擎模型，必填；示例取 `bigmodel`（推荐，配 `language`） |
 | `source_type` | int | 是 | `0` URL 上传 / `1` 本地数据（base64） |
 | `voice_format` | string | 是 | 音频格式：`wav`、`pcm`、`ogg-opus`、`mp3`、`m4a` |
 | `url` | string | 条件 | 音频 URL（`source_type=0` 必填） |
@@ -267,7 +267,8 @@ class MyListener : public trtc_asr::SpeechRecognitionListener {
 MyListener listener;
 trtc_asr::v3::SpeechRecognizer recognizer(
     trtc_asr::v3::NewCredential(1400000000, "your-sdk-secret-key"),
-    "16k_zh_en", &listener);
+    "bigmodel", &listener);
+recognizer.SetLanguage("zh"); // bigmodel 建议显式指定语种
 
 // Start() 同步等待服务端 ack；鉴权/参数错误在这里抛出。
 recognizer.Start();
@@ -285,7 +286,11 @@ trtc_asr::v3::SentenceRecognizer recognizer(
     trtc_asr::v3::NewCredential(1400000000, "your-sdk-secret-key"));
 
 // Raw audio bytes; base64 encoding is applied internally (like v2).
-auto resp = recognizer.RecognizeData(pcm_bytes, "pcm", "16k_zh_en");
+trtc_asr::v3::TranscribeRequest req;
+req.engine_model_type = "bigmodel";
+req.voice_format = "pcm";
+req.language = "zh";
+auto resp = recognizer.RecognizeDataWithOptions(pcm_bytes, &req);
 std::cout << resp.result << " (" << resp.audio_duration << " ms)\n";
 ```
 
@@ -297,8 +302,12 @@ std::cout << resp.result << " (" << resp.audio_duration << " ms)\n";
 trtc_asr::v3::FileRecognizer recognizer(
     trtc_asr::v3::NewCredential(1400000000, "your-sdk-secret-key"));
 
-std::string task_id = recognizer.CreateTaskFromUrl(
-    "https://example.com/audio.wav", "16k_zh_en");
+trtc_asr::v3::CreateTranscriptionRequest req;
+req.engine_model_type = "bigmodel";
+req.language = "zh";
+req.source_type = trtc_asr::v3::kSourceTypeUrl;
+req.url = "https://example.com/audio.wav";
+std::string task_id = recognizer.CreateTask(req);
 auto status = recognizer.WaitForResult(task_id); // 轮询直至完成
 std::cout << status.result << " (" << status.audio_duration << " s)\n";
 ```
@@ -348,9 +357,12 @@ std::cout << status.result << " (" << status.audio_duration << " s)\n";
 
 | 类型 | 说明 |
 |------|------|
+| `bigmodel` | 大模型引擎，推荐；配合 `language` 指定语种（如 `zh`） |
 | `8k_zh` | 中文通用，常用于电话场景 |
-| `16k_zh` | 中文通用（推荐） |
+| `16k_zh` | 中文通用 |
 | `16k_zh_en` | 中英文通用 |
+
+> `bigmodel` 的 `language` 不只是提示：服务端按它选择后端模型（`zh` 走自研大模型，留空走通用链路）。示例默认 `bigmodel` + `zh`。
 
 ## 示例
 
@@ -366,7 +378,7 @@ std::cout << status.result << " (" << status.audio_duration << " s)\n";
 ```bash
 cmake -B build && cmake --build build -j
 TRTC_ASR_SDK_APP_ID=1400000000 TRTC_ASR_SECRET_KEY=... \
-  ./build/v3_realtime_asr examples/test.pcm
+  ./build/v3_realtime_asr examples/test.pcm bigmodel
 ```
 
 ## 项目结构

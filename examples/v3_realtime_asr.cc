@@ -49,12 +49,26 @@ int main(int argc, char** argv) {
     return 1;
   }
   const std::string path = argc > 1 ? argv[1] : "examples/test.pcm";
-  const std::string engine = argc > 2 ? argv[2] : "16k_zh_en";
+  if (argc <= 2) {
+    std::cerr << "error: engine argument is required (engine model type, e.g. bigmodel)\n";
+    return 2;
+  }
+  const std::string engine = argv[2];
+  // Empty lang falls back to server-side language detection.
+  std::string lang = argc > 3 ? argv[3] : "";
+  // The bigmodel engine is best used with an explicit language; every other
+  // engine falls back to server-side detection unless lang is given.
+  if (lang.empty() && engine == "bigmodel") {
+    lang = "zh";
+  }
 
   // v3 credentials need only SdkAppID + SecretKey (no Tencent Cloud APPID).
   Printer listener;
   trtc_asr::v3::SpeechRecognizer recognizer(
       trtc_asr::v3::NewCredential(sdk_app_id, secret_key), engine, &listener);
+  if (!lang.empty()) {
+    recognizer.SetLanguage(lang); // bigmodel 建议显式指定语种
+  }
 
   // Start() waits synchronously for the server's ack: authentication (4002)
   // and gray-switch (4001) errors are thrown here, not via OnFail.

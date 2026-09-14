@@ -74,17 +74,31 @@ std::string EnvStr(const char* name) {
 
 int main(int argc, char** argv) {
   if (argc < 2) {
-    std::cerr << "usage: " << argv[0] << " <audio.pcm> [engine_model_type]\n";
+    std::cerr << "usage: " << argv[0] << " <audio.pcm> <engine> [lang]\n";
     return 1;
   }
   std::string path = argv[1];
-  std::string engine = argc > 2 ? argv[2] : "16k_zh_en";
+  if (argc <= 2) {
+    std::cerr << "error: engine argument is required (engine model type, e.g. bigmodel)\n";
+    return 2;
+  }
+  std::string engine = argv[2];
+  // Empty lang falls back to server-side language detection.
+  std::string lang = argc > 3 ? argv[3] : "";
+  // The bigmodel engine is best used with an explicit language; every other
+  // engine falls back to server-side detection unless lang is given.
+  if (lang.empty() && engine == "bigmodel") {
+    lang = "zh";
+  }
 
   trtc_asr::Credential credential(EnvInt("TRTC_ASR_APP_ID"), EnvInt("TRTC_ASR_SDK_APP_ID"),
                                   EnvStr("TRTC_ASR_SECRET_KEY"));
 
   Printer listener;
   trtc_asr::SpeechRecognizer recognizer(credential, engine, &listener);
+  if (!lang.empty()) {
+    recognizer.SetLanguage(lang); // bigmodel 建议显式指定语种
+  }
   // recognizer.SetSpeakerDiarization(trtc_asr::kSpeakerDiarizationCluster);
   // recognizer.SetWordInfo(1);
 

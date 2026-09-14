@@ -336,6 +336,23 @@ TranscribeResponse SentenceRecognizer::RecognizeData(const std::vector<uint8_t>&
   return Recognize(req);
 }
 
+TranscribeResponse SentenceRecognizer::RecognizeDataWithOptions(const std::vector<uint8_t>& data,
+                                                                TranscribeRequest* req) {
+  if (req == nullptr) {
+    throw ASRError(kErrInvalidParam, "request is null");
+  }
+  if (data.empty()) {
+    throw ASRError(kErrInvalidParam, "audio data is empty");
+  }
+  if (data.size() > 3 * 1024 * 1024) {
+    throw ASRError(kErrInvalidParam, "audio data exceeds 3MB limit");
+  }
+  req->source_type = kSourceTypeData;
+  req->data = Base64Encode(data.data(), data.size());
+  req->data_len = static_cast<int64_t>(data.size());
+  return Recognize(*req);
+}
+
 TranscribeResponse SentenceRecognizer::RecognizeUrl(const std::string& audio_url,
                                                     const std::string& voice_format,
                                                     const std::string& engine_model_type) {
@@ -535,6 +552,23 @@ std::string FileRecognizer::CreateTaskFromData(const std::vector<uint8_t>& data,
   req.data = Base64Encode(data.data(), data.size());
   req.data_len = static_cast<int64_t>(data.size());
   return CreateTask(req);
+}
+
+std::string FileRecognizer::CreateTaskFromDataWithOptions(const std::vector<uint8_t>& data,
+                                                          CreateTranscriptionRequest* req) {
+  if (req == nullptr) {
+    throw ASRError(kErrInvalidParam, "request is null");
+  }
+  if (data.empty()) {
+    throw ASRError(kErrInvalidParam, "audio data is empty");
+  }
+  if (data.size() > 5 * 1024 * 1024) {
+    throw ASRError(kErrInvalidParam, "audio data exceeds 5MB limit");
+  }
+  req->source_type = kSourceTypeData;
+  req->data = Base64Encode(data.data(), data.size());
+  req->data_len = static_cast<int64_t>(data.size());
+  return CreateTask(*req);
 }
 
 std::string FileRecognizer::CreateTaskFromUrl(const std::string& audio_url,

@@ -63,7 +63,7 @@ Within **3 seconds** of the WebSocket handshake, send one start frame:
 {
   "type": "start",
   "auth": {"sdkappid": "1400000001", "usersig": "eJw..."},
-  "params": {"engine_model_type": "16k_zh_en", "voice_format": 1, "needvad": 1}
+  "params": {"engine_model_type": "bigmodel", "language": "zh", "voice_format": 1, "needvad": 1}
 }
 ```
 
@@ -129,7 +129,7 @@ sequenceDiagram
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `voice_id` | string | from URL | Stream ID (<=128 chars); same as the URL or omitted |
-| `engine_model_type` | string | `16k_zh_en` | Engine model |
+| `engine_model_type` | string | **required** | Engine model; no default, must be provided. The examples pass `bigmodel` (recommended, with `language`) |
 | `language` | string | empty | Language hint (`zh`, `en`, `ja`, …); empty = auto detect |
 | `voice_format` | int | `1` | Audio format: `1`pcm/`4`speex/`6`silk/`8`mp3/`10`opus/`11`ogg/`12`wav/`14`m4a/`16`aac |
 | `input_sample_rate` | int | — | Only `8000`: declare 8k PCM input for a 16k engine |
@@ -182,7 +182,7 @@ With diarization on, speaker attribution comes through `result.speaker_segments[
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `engine_model_type` | string | yes | Engine model |
+| `engine_model_type` | string | yes | Engine model, required; the examples pass `bigmodel` (recommended, with `language`) |
 | `source_type` | int | yes | `0` URL / `1` local data (base64) |
 | `voice_format` | string | yes | `wav`, `pcm`, `ogg-opus`, `mp3`, `m4a` |
 | `url` | string | conditional | Audio URL (required when `source_type=0`) |
@@ -268,7 +268,8 @@ class MyListener : public trtc_asr::SpeechRecognitionListener {
 MyListener listener;
 trtc_asr::v3::SpeechRecognizer recognizer(
     trtc_asr::v3::NewCredential(1400000000, "your-sdk-secret-key"),
-    "16k_zh_en", &listener);
+    "bigmodel", &listener);
+recognizer.SetLanguage("zh"); // bigmodel works best with an explicit language
 
 // Start() waits synchronously for the server ack; auth/param errors throw here.
 recognizer.Start();
@@ -284,7 +285,11 @@ trtc_asr::v3::SentenceRecognizer recognizer(
     trtc_asr::v3::NewCredential(1400000000, "your-sdk-secret-key"));
 
 // Raw audio bytes; base64 encoding is applied internally (like v2).
-auto resp = recognizer.RecognizeData(pcm_bytes, "pcm", "16k_zh_en");
+trtc_asr::v3::TranscribeRequest req;
+req.engine_model_type = "bigmodel";
+req.voice_format = "pcm";
+req.language = "zh";
+auto resp = recognizer.RecognizeDataWithOptions(pcm_bytes, &req);
 std::cout << resp.result << " (" << resp.audio_duration << " ms)\n";
 ```
 
@@ -294,8 +299,12 @@ std::cout << resp.result << " (" << resp.audio_duration << " ms)\n";
 trtc_asr::v3::FileRecognizer recognizer(
     trtc_asr::v3::NewCredential(1400000000, "your-sdk-secret-key"));
 
-std::string task_id = recognizer.CreateTaskFromUrl(
-    "https://example.com/audio.wav", "16k_zh_en");
+trtc_asr::v3::CreateTranscriptionRequest req;
+req.engine_model_type = "bigmodel";
+req.language = "zh";
+req.source_type = trtc_asr::v3::kSourceTypeUrl;
+req.url = "https://example.com/audio.wav";
+std::string task_id = recognizer.CreateTask(req);
 auto status = recognizer.WaitForResult(task_id);
 std::cout << status.result << " (" << status.audio_duration << " s)\n";
 ```
@@ -340,10 +349,12 @@ Realtime recognition (`v3::SpeechRecognizer`); setters mirror the v2 client:
 
 | Value | Description |
 |-------|-------------|
+| `bigmodel` | Large model engine, recommended; pair it with `language` (e.g. `zh`) |
 | `8k_zh` | Chinese, telephony |
-| `16k_zh` | Chinese, general (recommended) |
+| `16k_zh` | Chinese, general |
 | `16k_zh_en` | Chinese + English |
-| `bigmodel` | Large model engine (multi-language) |
+
+> For `bigmodel`, `language` is not just a hint: the server picks the backend model from it (`zh` routes to the self-developed large model, empty routes to the generic pipeline). The examples default to `bigmodel` + `zh`.
 
 ## Examples
 
