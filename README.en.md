@@ -376,6 +376,7 @@ TRTC_ASR_SDK_APP_ID=... TRTC_ASR_SECRET_KEY=... ./build/v3_realtime_asr test.pcm
 trtc-asr-sdk-cpp/
 ├── include/trtc_asr/
 │   ├── credential.h / usersig.h / errors.h   # shared
+│   ├── sigpipe.h              # SIGPIPE notes + optional process-wide switch
 │   ├── speech_recognizer.h    # v2 realtime client (shared lifecycle state)
 │   ├── sentence_recognizer.h  # v2 sentence client
 │   ├── file_recognizer.h      # v2 file client
@@ -398,6 +399,20 @@ trtc-asr-sdk-cpp/
 **Can I query a v1 task ID through v3?** No. The v1 `RecTaskId` and the v3 `transcription_id` are separate task spaces.
 
 **How do I read error codes?** SDK-local codes are 10xx; server codes are 4xxx/5xxx. `ASRError::code()` ranges do not overlap.
+
+**Can SIGPIPE kill my process?** No, and nothing has to be configured.
+
+Writing to a socket whose peer is gone raises `SIGPIPE`, whose default disposition terminates the process (exit code `141` = 128 + 13). The SDK protects its own connections without touching any process-wide state: `SO_NOSIGPIPE` on macOS/BSD (fd-level, so OpenSSL's writes are covered too), `send(..., MSG_NOSIGNAL)` for plaintext on Linux, and — since `SSL_write` / `SSL_read` cannot carry that flag — SIGPIPE blocked on the calling thread around the OpenSSL calls, with the pending signal the SDK caused consumed before the previous mask is restored. A `SIGPIPE` the host already had pending is never stolen, and a handler the host installed keeps working for the host's own sockets.
+
+If you would rather adopt the simpler process-wide policy (what libcurl and most servers do), there is an explicit opt-in that the SDK never calls on its own:
+
+```cpp
+#include "trtc_asr/sigpipe.h"
+
+trtc_asr::IgnoreSigpipeProcessWide();  // optional; changes process-wide state
+```
+
+Use it only at start-up, and only if your application has no `SIGPIPE` handler of its own.
 
 ## License
 

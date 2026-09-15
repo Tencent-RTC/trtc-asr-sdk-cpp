@@ -53,11 +53,27 @@ int BindLoopback(int* port) {
 bool WriteAll(int fd, const std::string& data) {
   size_t off = 0;
   while (off < data.size()) {
+    // The peer under test may close at any point; MSG_NOSIGNAL (SO_NOSIGPIPE
+    // on macOS, set after accept) keeps that from killing the test binary.
+#if defined(MSG_NOSIGNAL)
+    ssize_t n = ::send(fd, data.data() + off, data.size() - off, MSG_NOSIGNAL);
+#else
     ssize_t n = ::send(fd, data.data() + off, data.size() - off, 0);
+#endif
     if (n <= 0) return false;
     off += static_cast<size_t>(n);
   }
   return true;
+}
+
+/// Suppresses SIGPIPE on an accepted socket where the option exists.
+void SuppressSigpipe(int fd) {
+#if defined(SO_NOSIGPIPE)
+  int one = 1;
+  setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof(one));
+#else
+  (void)fd;
+#endif
 }
 
 bool ReadExact(int fd, uint8_t* buf, size_t n) {
@@ -123,6 +139,7 @@ void MockHttpServer::Serve() {
   while (true) {
     int fd = accept(listen_fd_, nullptr, nullptr);
     if (fd < 0) return;
+    SuppressSigpipe(fd);
 
     // Read request head.
     std::string head;
@@ -282,6 +299,7 @@ void MockWsServer::Join() {
 void MockWsServer::Run() {
   int fd = accept(listen_fd_, nullptr, nullptr);
   if (fd < 0) return;
+  SuppressSigpipe(fd);
 
   // Handshake: read head, answer 101.
   std::string head;

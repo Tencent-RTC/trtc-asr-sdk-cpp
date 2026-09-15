@@ -3,7 +3,9 @@
 #include <cerrno>
 #include <chrono>
 #include <cstring>
+#include <ctime>
 #include <fcntl.h>
+#include <pthread.h>
 #include <random>
 
 #include <netdb.h>
@@ -28,6 +30,14 @@ int64_t NowMs() {
       .count();
 }
 
+/// Flags for send(2). MSG_NOSIGNAL makes a write to a closed peer fail with
+/// EPIPE instead of raising SIGPIPE; it does not exist on macOS/BSD, where
+/// SO_NOSIGPIPE (set in TcpConnect) covers the same ground at the fd level.
+#if defined(MSG_NOSIGNAL)
+constexpr int kSendFlags = MSG_NOSIGNAL;
+#else
+constexpr int kSendFlags = 0;
+#endif
 /// Budget for finishing a frame once its header has been read. The caller's
 /// poll window only guards waiting for the NEXT frame; a frame that has
 /// started must be consumed completely (see WsClient::Read).
@@ -131,6 +141,9 @@ int TcpConnect(const std::string& host, int port, int timeout_ms, std::string* e
   }
   int one = 1;
   setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
+  // Best effort: on Linux there is no such option and the per-write
+  // MSG_NOSIGNAL / thread-mask guard take over.
+  SuppressSigpipeOnSocket(fd);
   return fd;
 }
 
@@ -152,6 +165,71 @@ int PollFd(int fd, short events, int timeout_ms) {
 }
 
 }  // namespace
+
+bool SuppressSigpipeOnSocket(int fd) {
+#if defined(SO_NOSIGPIPE)
+  int one = 1;
+  return setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof(one)) == 0;
+#else
+  (void)fd;
+  return false;
+#endif
+}
+
+ssize_t SendNoSignal(int fd, const void* buf, size_t n) {
+  return ::send(fd, buf, n, kSendFlags);
+}
+
+ScopedSigpipeSuppressor::ScopedSigpipeSuppressor() {
+#ifdef TRTC_ASR_SIGPIPE_GUARD
+  sigset_t sigpipe_set;
+  sigemptyset(&sigpipe_set);
+  sigaddset(&sigpipe_set, SIGPIPE);
+
+  // Remember whether a SIGPIPE was already pending: if so it belongs to the
+  // host (or to an outer scope) and must not be consumed on the way out.
+  sigset_t pending;
+  sigemptyset(&pending);
+  was_pending_ = sigpending(&pending) == 0 && sigismember(&pending, SIGPIPE) == 1;
+
+  blocked_ = pthread_sigmask(SIG_BLOCK, &sigpipe_set, &old_mask_) == 0;
+#endif
+}
+
+ScopedSigpipeSuppressor::~ScopedSigpipeSuppressor() {
+#ifdef TRTC_ASR_SIGPIPE_GUARD
+  if (!blocked_) return;
+  // Callers inspect errno (and SSL_get_error, which consults it) right after
+  // the guarded call returns; the signal syscalls below must not clobber it.
+  const int saved_errno = errno;
+  if (!was_pending_) {
+    sigset_t pending;
+    sigemptyset(&pending);
+    if (sigpending(&pending) == 0 && sigismember(&pending, SIGPIPE) == 1) {
+      // Drain the SIGPIPE this scope caused; without this it would be
+      // delivered as soon as the mask below is restored.
+      sigset_t sigpipe_set;
+      sigemptyset(&sigpipe_set);
+      sigaddset(&sigpipe_set, SIGPIPE);
+      struct timespec zero = {0, 0};
+      int rc;
+      do {
+        rc = sigtimedwait(&sigpipe_set, nullptr, &zero);
+      } while (rc < 0 && errno == EINTR);
+    }
+  }
+  pthread_sigmask(SIG_SETMASK, &old_mask_, nullptr);
+  errno = saved_errno;
+#endif
+}
+
+bool ScopedSigpipeSuppressor::Active() {
+#ifdef TRTC_ASR_SIGPIPE_GUARD
+  return true;
+#else
+  return false;
+#endif
+}
 
 std::string EncodeWsFrame(int opcode, const std::string& payload, bool mask) {
   std::string frame;
@@ -218,7 +296,13 @@ std::unique_ptr<WsClient> WsClient::Connect(const std::string& url, int timeout_
     // Handshake with poll-driven deadline.
     int64_t deadline = NowMs() + timeout_ms;
     while (true) {
-      int rc = SSL_connect(client->ssl_);
+      int rc;
+      {
+        // The handshake writes to the socket, so it can hit a peer that has
+        // already gone away.
+        ScopedSigpipeSuppressor no_sigpipe;
+        rc = SSL_connect(client->ssl_);
+      }
       if (rc == 1) break;
       int ssl_err = SSL_get_error(client->ssl_, rc);
       if (ssl_err == SSL_ERROR_WANT_READ || ssl_err == SSL_ERROR_WANT_WRITE) {
@@ -347,15 +431,22 @@ bool WsClient::WriteAll(const uint8_t* buf, size_t n, int timeout_ms, std::strin
     }
     ssize_t rc;
     if (ssl_ != nullptr) {
-      rc = SSL_write(ssl_, buf + off, static_cast<int>(n - off));
+      int ssl_rc;
+      {
+        // SSL_write cannot carry MSG_NOSIGNAL down to the socket, so on Linux
+        // the mask-based guard is what keeps a dead peer from killing the host.
+        ScopedSigpipeSuppressor no_sigpipe;
+        ssl_rc = SSL_write(ssl_, buf + off, static_cast<int>(n - off));
+      }
+      rc = ssl_rc;
       if (rc <= 0) {
-        int ssl_err = SSL_get_error(ssl_, rc);
+        int ssl_err = SSL_get_error(ssl_, ssl_rc);
         if (ssl_err == SSL_ERROR_WANT_WRITE) continue;
         *err = "tls write failed";
         return false;
       }
     } else {
-      rc = ::send(fd_, buf + off, n - off, 0);
+      rc = SendNoSignal(fd_, buf + off, n - off);
       if (rc < 0) {
         if (errno == EINTR || errno == EAGAIN) continue;
         *err = std::string("socket write failed: ") + std::strerror(errno);
@@ -393,9 +484,16 @@ int WsClient::ReadExact(uint8_t* buf, size_t n, int64_t deadline_ms) {
     }
     ssize_t rc;
     if (ssl_ != nullptr) {
-      rc = SSL_read(ssl_, buf + off, static_cast<int>(n - off));
+      int ssl_rc;
+      {
+        // SSL_read can write to the socket too (TLS 1.3 post-handshake
+        // messages such as KeyUpdate), so it needs the same guard.
+        ScopedSigpipeSuppressor no_sigpipe;
+        ssl_rc = SSL_read(ssl_, buf + off, static_cast<int>(n - off));
+      }
+      rc = ssl_rc;
       if (rc <= 0) {
-        int ssl_err = SSL_get_error(ssl_, rc);
+        int ssl_err = SSL_get_error(ssl_, ssl_rc);
         if (ssl_err == SSL_ERROR_WANT_READ) continue;
         // The peer can send its close_notify while application data is still
         // buffered inside the SSL object (a frame that fully arrived

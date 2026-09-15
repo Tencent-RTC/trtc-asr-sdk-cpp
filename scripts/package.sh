@@ -68,17 +68,21 @@ verify_package() {
 #include "trtc_asr/credential.h"
 #include "trtc_asr/file_recognizer.h"
 #include "trtc_asr/sentence_recognizer.h"
+#include "trtc_asr/sigpipe.h"
 #include "trtc_asr/speech_recognizer.h"
 #include "trtc_asr/usersig.h"
 #include "trtc_asr/version.h"
 
 int main() {
+  // Also proves the optional SIGPIPE switch is exported by the installed lib.
+  const bool sigpipe_ignored = trtc_asr::IgnoreSigpipeProcessWide();
   const trtc_asr::Credential credential(1400000000, 1400000001, "secret");
   const std::string sig = trtc_asr::GenUserSig(
       credential.sdk_app_id(), credential.secret_key(), "smoke-user", 60);
-  std::printf("trtc_asr %s, usersig len=%zu, endpoint=%s\n",
+  std::printf("trtc_asr %s, usersig len=%zu, endpoint=%s, sigpipe_ignored=%d\n",
               TRTC_ASR_VERSION_STRING, sig.size(),
-              trtc_asr::SpeechRecognizer::kEndpoint);
+              trtc_asr::SpeechRecognizer::kEndpoint,
+              static_cast<int>(sigpipe_ignored));
   return sig.empty() ? 1 : 0;
 }
 EOF

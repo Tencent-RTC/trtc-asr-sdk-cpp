@@ -74,6 +74,7 @@ add_library(trtc_asr ${_trtc_asr_lib_type}
   src/types.cc
   src/ws_client.cc
   src/http_client.cc
+  src/sigpipe.cc
   src/speech_recognizer.cc
   src/sentence_recognizer.cc
   src/file_recognizer.cc
@@ -151,6 +152,7 @@ if(TRTC_ASR_BUILD_TESTS)
     tests/speech_recognizer_test.cc
     tests/sdkinfo_test.cc
     tests/site_test.cc
+    tests/sigpipe_test.cc
     tests/mock_servers.cc
     tests/v3_test.cc
   )

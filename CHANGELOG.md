@@ -7,6 +7,23 @@
 
 ## [未发布]
 
+### 修复
+
+- **写入已断开的连接可能直接杀死宿主进程**：SDK 此前完全没有处理 `SIGPIPE`，
+  向对端已关闭的 socket 写入时内核投递的 `SIGPIPE` 按默认行为终止整个宿主进程
+  （表现为退出码 `141` = 128 + 13）。现在 WebSocket 写路径做了完整防护，且
+  **不改动进程级信号处理**：macOS/BSD 在 socket 上设置 `SO_NOSIGPIPE`（fd 级，
+  连 OpenSSL 内部的写也覆盖）；Linux 明文走 `send(..., MSG_NOSIGNAL)`；Linux 下
+  `SSL_write` / `SSL_read` 无法携带该 flag，改为在调用线程内临时屏蔽 `SIGPIPE`，
+  取走本次调用产生的 pending 信号后恢复原掩码——宿主原本 pending 的信号不会被
+  吞掉，宿主自己安装的 handler 也继续生效。
+
+### 新增
+
+- `trtc_asr::IgnoreSigpipeProcessWide()`（`trtc_asr/sigpipe.h`）：可选的进程级
+  `SIGPIPE` 忽略开关，供偏好 libcurl 式统一策略的宿主显式调用。SDK 自身默认
+  不会调用它。
+
 ## [1.2.2] - 2026-09-14
 
 ### 变更

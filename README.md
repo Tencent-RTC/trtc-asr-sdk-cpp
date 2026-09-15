@@ -394,6 +394,7 @@ trtc-asr-sdk-cpp/
 │   ├── file_recognizer.h       # v2 录音文件识别器
 │   ├── types.h                 # 下行响应类型（两版共用）+ 校验
 │   ├── errors.h                # 错误定义（共用）
+│   ├── sigpipe.h               # SIGPIPE 说明 + 可选的进程级忽略开关
 │   └── v3.h                    # v3 协议客户端（wire 类型 + 三个识别器）
 ├── src/
 │   ├── *.cc                    # v2 实现与内部工具（WsClient / HttpPost）
@@ -424,6 +425,33 @@ trtc-asr-sdk-cpp/
 ### 错误码怎么看？
 
 SDK 本地错误码是 10xx（如 `1001` 参数错误）；服务端返回的是 4xxx/5xxx（如 `4002` 鉴权失败）。`ASRError::code()` 的值域不冲突，可直接按区间判断来源。
+
+### SDK 会不会因为 SIGPIPE 让我的进程退出？
+
+不会，**默认无需任何配置**。
+
+向对端已关闭的 socket 写入会触发 `SIGPIPE`，其默认行为是终止进程（表现为退出码 `141` = 128 + 13）。SDK 对自己建立的连接做了完整防护，且**不改动进程级信号处理**：
+
+| 平台 / 路径 | 机制 |
+| --- | --- |
+| macOS / BSD（明文 + TLS） | socket 上设置 `SO_NOSIGPIPE`（fd 级，OpenSSL 的写也覆盖） |
+| Linux 明文 | `send(..., MSG_NOSIGNAL)` |
+| Linux TLS | `SSL_write` / `SSL_read` 无法携带 `MSG_NOSIGNAL`，改为在**调用线程内**临时屏蔽 `SIGPIPE`，取走本次调用产生的 pending 信号后恢复原信号掩码 |
+
+第三种做法只影响 SDK 自己的线程、且会还原现场：宿主原本 pending 的 `SIGPIPE` 不会被吞掉，宿主为自己的 socket 安装的 `SIGPIPE` handler 也继续有效。
+
+如果你更希望采用「全进程永不收到 SIGPIPE」的简单策略（libcurl、多数服务端程序的做法），SDK 提供一个**显式的**开关，默认不会被调用：
+
+```cpp
+#include "trtc_asr/sigpipe.h"
+
+int main() {
+  trtc_asr::IgnoreSigpipeProcessWide();  // 可选；会改变全进程的 SIGPIPE 处理
+  // ...
+}
+```
+
+仅在宿主自己没有安装 `SIGPIPE` handler 时使用，并且只在启动时调用一次。
 
 ## License
 
