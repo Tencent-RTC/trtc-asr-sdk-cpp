@@ -28,6 +28,11 @@ int64_t NowMs() {
       .count();
 }
 
+/// Budget for finishing a frame once its header has been read. The caller's
+/// poll window only guards waiting for the NEXT frame; a frame that has
+/// started must be consumed completely (see WsClient::Read).
+constexpr int64_t kFrameReadBudgetMs = 10000;
+
 /// Parses ws://host[:port]/path or wss://... into components.
 struct UrlParts {
   bool secure = false;
@@ -447,20 +452,28 @@ int WsClient::Read(WsFrame* out, int timeout_ms, std::string* err) {
       return rc;
     }
 
+    // A frame has started: it MUST be consumed completely before returning,
+    // otherwise the caller's next Read would parse mid-frame bytes as a frame
+    // header. Large streaming responses (e.g. word_info finals) can arrive
+    // across several TCP segments, so the rest of the frame gets its own much
+    // larger budget instead of the caller's short poll window: mistaking a
+    // slow segment for a protocol error here kills healthy sessions.
+    const int64_t frame_deadline = NowMs() + kFrameReadBudgetMs;
+
     out->fin = (head[0] & 0x80) != 0;
     out->opcode = head[0] & 0x0F;
     bool masked = (head[1] & 0x80) != 0;
     uint64_t len = head[1] & 0x7F;
     if (len == 126) {
       uint8_t ext[2];
-      if (ReadExact(ext, 2, deadline) != 1) {
+      if (ReadExact(ext, 2, frame_deadline) != 1) {
         fill_err("read extended length failed");
         return -1;
       }
       len = (static_cast<uint64_t>(ext[0]) << 8) | ext[1];
     } else if (len == 127) {
       uint8_t ext[8];
-      if (ReadExact(ext, 8, deadline) != 1) {
+      if (ReadExact(ext, 8, frame_deadline) != 1) {
         fill_err("read extended length failed");
         return -1;
       }
@@ -473,14 +486,14 @@ int WsClient::Read(WsFrame* out, int timeout_ms, std::string* err) {
     }
 
     uint8_t mask_key[4] = {0};
-    if (masked && ReadExact(mask_key, 4, deadline) != 1) {
+    if (masked && ReadExact(mask_key, 4, frame_deadline) != 1) {
       fill_err("read mask key failed");
       return -1;
     }
 
     out->payload.resize(len);
     if (len > 0 &&
-        ReadExact(reinterpret_cast<uint8_t*>(out->payload.data()), len, deadline) != 1) {
+        ReadExact(reinterpret_cast<uint8_t*>(out->payload.data()), len, frame_deadline) != 1) {
       fill_err("read payload failed");
       if (err != nullptr && !last_read_err_.empty()) *err += "; " + last_read_err_;
       return -1;
