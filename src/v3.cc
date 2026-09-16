@@ -31,9 +31,7 @@ constexpr int kMinVadSilenceTimeMs = 240;
 constexpr int kMaxVadSilenceTimeMs = 2000;
 
 /// Wraps params into the {"auth": ..., "params": ...} offline body, injecting
-/// the SDK telemetry into the params block. The protocol's internal
-/// "business" field (gray/routing dimension managed by the service side,
-/// default "OUTER") is not part of the public SDK surface and is never sent.
+/// the SDK telemetry into the params block.
 nlohmann::json OfflineEnvelope(const Credential& credential, const std::string& request_id,
                                nlohmann::json params) {
   std::string user_sig = credential.user_sig();

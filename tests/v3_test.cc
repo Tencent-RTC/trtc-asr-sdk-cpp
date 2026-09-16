@@ -136,8 +136,7 @@ TEST(V3SpeechRecognizer, StartFrameWireFormat) {
   EXPECT_EQ(frame["type"], "start");
   EXPECT_EQ(frame["auth"]["sdkappid"], "1400000000");
   EXPECT_FALSE(frame["auth"]["usersig"].get<std::string>().empty());
-  // business is a server-side internal gray dimension; never sent.
-  EXPECT_FALSE(frame["auth"].contains("business"));
+  EXPECT_EQ(frame["auth"].size(), 2u);
 
   const auto& params = frame["params"];
   EXPECT_EQ(params["voice_id"], "voice-1");
@@ -194,7 +193,7 @@ TEST(V3SpeechRecognizer, StartAuthErrorIsSynchronous) {
   }
 }
 
-TEST(V3SpeechRecognizer, StartGrayDisabledErrorIsSynchronous) {
+TEST(V3SpeechRecognizer, Start4001ErrorIsSynchronous) {
   trtc_asr_test::MockWsServer server([](trtc_asr_test::MockWsSession& ws) {
     int opcode;
     std::string payload;
@@ -339,7 +338,7 @@ TEST(V3Transcribe, WireFormatAndErrorMapping) {
     EXPECT_EQ(body["auth"]["sdkappid"], "1400000000");
     EXPECT_FALSE(body["auth"]["usersig"].get<std::string>().empty());
     EXPECT_FALSE(body["auth"]["request_id"].get<std::string>().empty());
-    EXPECT_FALSE(body["auth"].contains("business"));
+    EXPECT_EQ(body["auth"].size(), 3u);
     const auto& params = body["params"];
     EXPECT_EQ(params["engine_model_type"], "16k_zh_en");
     EXPECT_EQ(params["needvad"], 0);  // explicit 0 honored
