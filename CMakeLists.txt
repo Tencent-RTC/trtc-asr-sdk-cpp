@@ -155,6 +155,7 @@ if(TRTC_ASR_BUILD_TESTS)
     tests/sigpipe_test.cc
     tests/mock_servers.cc
     tests/v3_test.cc
+    tests/v2_speaker_context.cc
   )
   target_include_directories(trtc_asr_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/tests

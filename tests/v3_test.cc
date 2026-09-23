@@ -56,6 +56,17 @@ void ServeAckThenFinalAfterEnd(trtc_asr_test::MockWsSession& ws) {
   }
 }
 
+/// A 64-hex speaker_context_id, as issued by the server.
+const char* const kContextId =
+    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+/// An ack carrying the speaker-context handshake result (or none).
+std::string AckWithSpeakerContinue(const std::string& voice_id,
+                                   const std::string& speaker_continue) {
+  return "{\"code\":0,\"message\":\"success\",\"voice_id\":\"" + voice_id +
+         "\",\"speaker_continue\":" + speaker_continue + "}";
+}
+
 class RecordingListener : public trtc_asr::SpeechRecognitionListener {
  public:
   std::atomic<int> begins{0};
@@ -64,6 +75,13 @@ class RecordingListener : public trtc_asr::SpeechRecognitionListener {
   std::atomic<int> completes{0};
   std::atomic<int> fails{0};
   std::atomic<int> last_fail_code{0};
+  std::mutex mu;
+  std::vector<std::optional<trtc_asr::SpeakerContinue>> start_speaker_continues;
+
+  void OnRecognitionStart(const SpeechRecognitionResponse& resp) override {
+    std::lock_guard<std::mutex> lock(mu);
+    start_speaker_continues.push_back(resp.speaker_continue);
+  }
 
   void OnSentenceBegin(const SpeechRecognitionResponse&) override { begins++; }
   void OnRecognitionResultChange(const SpeechRecognitionResponse&) override { changes++; }
@@ -116,6 +134,8 @@ TEST(V3SpeechRecognizer, StartFrameWireFormat) {
   r.SetSpeakerDiarization(trtc_asr::v3::kSpeakerDiarizationVoiceprint);
   r.SetSpeakerRoles({SpeakerRole{"teacher", "https://example.com/t.wav"}});
   r.SetVoiceprintIds({"vp-1"});
+  r.SetEnableSpeakerContext(trtc_asr::v3::kSpeakerContextSync);
+  r.SetSpeakerContextId(kContextId);
   Context ctx;
   ctx.text = "bg";
   ctx.terms = {"ASR"};
@@ -150,6 +170,9 @@ TEST(V3SpeechRecognizer, StartFrameWireFormat) {
   EXPECT_EQ(params["hotword_list"], "深度学习|10");
   EXPECT_EQ(params["speaker_diarization"], 3);
   EXPECT_EQ(params["voiceprint_ids"], nlohmann::json::array({"vp-1"}));
+  // Speaker context ("断点续传"): the mode and the id travel in params.
+  EXPECT_EQ(params["enable_speaker_context"], trtc_asr::v3::kSpeakerContextSync);
+  EXPECT_EQ(params["speaker_context_id"], kContextId);
   // speaker_roles elements are snake_case, not the v2 CamelCase wire.
   EXPECT_EQ(params["speaker_roles"],
             nlohmann::json::array(
@@ -270,6 +293,93 @@ TEST(V3SpeechRecognizer, OversizedAudioFrameFailsLocally) {
   EXPECT_NO_THROW(r.Stop());
 }
 
+// The first response's speaker_continue block reaches both
+// GetSpeakerContinue() and OnRecognitionStart.
+TEST(V3SpeechRecognizer, SpeakerContinueHandshake) {
+  struct Case {
+    std::string ack_speaker_continue;  // JSON, or "null" for none
+    int mode;                          // 0 = context off
+    bool expect_id;
+    std::string want_status;
+  };
+  const std::vector<Case> cases = {
+      {"{\"continue_status\":\"resumed\",\"speaker_context_id\":\"" + std::string(kContextId) +
+           "\"}",
+       trtc_asr::v3::kSpeakerContextSync, true, trtc_asr::v3::kContinueStatusResumed},
+      {"{\"continue_status\":\"fresh\",\"speaker_context_id\":\"" + std::string(kContextId) +
+           "\"}",
+       trtc_asr::v3::kSpeakerContextSync, true, trtc_asr::v3::kContinueStatusFresh},
+      // Async mode answers before the snapshot is applied: id only.
+      {"{\"speaker_context_id\":\"" + std::string(kContextId) + "\"}",
+       trtc_asr::v3::kSpeakerContextAsync, true, ""},
+      {"null", 0, false, ""},
+  };
+
+  for (const auto& tc : cases) {
+    auto captured = std::make_shared<std::vector<std::string>>();
+    auto mu = std::make_shared<std::mutex>();
+    trtc_asr_test::MockWsServer server([=](trtc_asr_test::MockWsSession& ws) {
+      int opcode;
+      std::string payload;
+      if (ws.Read(&opcode, &payload) && opcode == 0x1) {
+        std::lock_guard<std::mutex> lock(*mu);
+        captured->push_back(payload);
+      }
+      ws.SendText(AckWithSpeakerContinue("v1", tc.ack_speaker_continue));
+      ServeAckThenFinalAfterEnd(ws);
+    });
+
+    RecordingListener listener;
+    SpeechRecognizer r(TestCredential(), "16k_zh_en", &listener);
+    r.SetEndpoint(server.Url());
+    if (tc.mode != 0) {
+      r.SetSpeakerDiarization(trtc_asr::v3::kSpeakerDiarizationCluster);
+      r.SetEnableSpeakerContext(tc.mode);
+    } else {
+      // A stored id must not ride along when the mode stays off.
+      r.SetSpeakerContextId(kContextId);
+    }
+    EXPECT_NO_THROW(r.Start());
+
+    // The getter is usable as soon as Start() returns.
+    const auto& sc = r.GetSpeakerContinue();
+    if (!tc.expect_id) {
+      EXPECT_FALSE(sc.has_value()) << "context off must yield no handshake result";
+    } else {
+      ASSERT_TRUE(sc.has_value());
+      EXPECT_EQ(sc->speaker_context_id, kContextId);
+      EXPECT_EQ(sc->continue_status, tc.want_status);
+    }
+
+    EXPECT_NO_THROW(r.Write(std::vector<uint8_t>(1280, 0)));
+    EXPECT_NO_THROW(r.Stop());
+    WaitUntil([&] { return listener.completes.load() > 0; }, 3000);
+
+    // The same block is delivered on OnRecognitionStart.
+    {
+      std::lock_guard<std::mutex> lock(listener.mu);
+      ASSERT_EQ(listener.start_speaker_continues.size(), 1u);
+      const auto& delivered = listener.start_speaker_continues[0];
+      if (tc.expect_id) {
+        ASSERT_TRUE(delivered.has_value());
+        EXPECT_EQ(delivered->speaker_context_id, kContextId);
+      } else {
+        EXPECT_FALSE(delivered.has_value());
+      }
+    }
+
+    // Wire: the context params are only sent when the caller opted in.
+    ASSERT_EQ(captured->size(), 1u);
+    const nlohmann::json params = nlohmann::json::parse((*captured)[0])["params"];
+    if (tc.mode == 0) {
+      EXPECT_FALSE(params.contains("enable_speaker_context"));
+      EXPECT_FALSE(params.contains("speaker_context_id"));
+    } else {
+      EXPECT_EQ(params["enable_speaker_context"], tc.mode);
+    }
+  }
+}
+
 TEST(V3SpeechRecognizer, LocalValidationRejectsOutOfRangeOptions) {
   const std::string long_voice_id(129, 'x');
   const std::vector<std::pair<std::string, std::function<void(SpeechRecognizer&)>>>
@@ -298,6 +408,15 @@ TEST(V3SpeechRecognizer, LocalValidationRejectsOutOfRangeOptions) {
           {"vad_level invalid", [](SpeechRecognizer& r) { r.SetVadLevel(2); }},
           {"noise_threshold out of range", [](SpeechRecognizer& r) { r.SetNoiseThreshold(4.1); }},
           {"diarization invalid", [](SpeechRecognizer& r) { r.SetSpeakerDiarization(2); }},
+          {"enable_speaker_context invalid",
+           [](SpeechRecognizer& r) {
+             r.SetSpeakerDiarization(trtc_asr::v3::kSpeakerDiarizationCluster);
+             r.SetEnableSpeakerContext(3);
+           }},
+          {"enable_speaker_context without diarization",
+           [](SpeechRecognizer& r) {
+             r.SetEnableSpeakerContext(trtc_asr::v3::kSpeakerContextSync);
+           }},
       };
   for (const auto& tc : cases) {
     RecordingListener listener;

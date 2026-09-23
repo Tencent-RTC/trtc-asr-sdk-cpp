@@ -1,5 +1,7 @@
 #include "trtc_asr/speech_recognizer.h"
 
+#include <cctype>
+
 #include "trtc_asr/params.h"
 #include "trtc_asr/usersig.h"
 #include "ws_client.h"
@@ -76,6 +78,15 @@ SpeechRecognizer::SpeechRecognizer(const Credential& credential,
       endpoint_(),
       engine_model_type_(std::move(engine_model_type)) {}
 
+void SpeechRecognizer::SetSpeakerContextId(std::string id) {
+  // Trim like the server does, so a stray newline from a persisted id does
+  // not turn the resume into a silent "new session".
+  const auto is_space = [](unsigned char c) { return std::isspace(c) != 0; };
+  while (!id.empty() && is_space(static_cast<unsigned char>(id.front()))) id.erase(id.begin());
+  while (!id.empty() && is_space(static_cast<unsigned char>(id.back()))) id.pop_back();
+  speaker_context_id_ = std::move(id);
+}
+
 SpeechRecognizer::~SpeechRecognizer() {
   // Ensure the connection is torn down if the user drops the recognizer
   // without Stop. Best effort; errors are irrelevant here.
@@ -117,6 +128,16 @@ void SpeechRecognizer::SetStopTimeout(std::chrono::milliseconds timeout) {
 void SpeechRecognizer::ValidateOptions() const {
   ValidateSpeakerDiarization(speaker_diarization_, speaker_number_, speaker_roles_,
                              voiceprint_ids_);
+  if (enable_speaker_context_ != 0 && enable_speaker_context_ != 1 &&
+      enable_speaker_context_ != 2) {
+    throw ASRError(kErrInvalidParam,
+                   "EnableSpeakerContext must be 0 (off), 1 (sync) or 2 (async), got " +
+                       std::to_string(enable_speaker_context_));
+  }
+  if (enable_speaker_context_ != 0 && speaker_diarization_ == 0) {
+    throw ASRError(kErrInvalidParam,
+                   "EnableSpeakerContext requires SetSpeakerDiarization(1) or (3)");
+  }
   ValidateVadTuning(vad_level_, noise_threshold_);
   if (filter_empty_result_.has_value()) {
     ValidateEnumOption("FilterEmptyResult", *filter_empty_result_, {0, 1});
@@ -187,6 +208,12 @@ void SpeechRecognizer::Connect() {
   p.max_speak_time = max_speak_time_;
   p.input_sample_rate = input_sample_rate_;
   p.speaker_diarization = speaker_diarization_;
+  if (enable_speaker_context_ != 0) {
+    p.enable_speaker_context = enable_speaker_context_;
+    if (!speaker_context_id_.empty()) {
+      p.speaker_context_id = speaker_context_id_;
+    }
+  }
   p.speaker_number = speaker_number_;
   p.speaker_roles = speaker_roles_;
   p.voiceprint_ids = voiceprint_ids_;
@@ -398,6 +425,13 @@ void SpeechRecognizer::ReadLoopInner(std::shared_ptr<internal::RecognizerSharedS
         // Non-terminal: the session continues.
         SafeOnFail(nullptr, e);
         continue;
+      }
+
+      if (resp.speaker_continue.has_value()) {
+        // 首响应携带断点续传握手结果；v2 的 OnRecognitionStart 在建连后
+        // 本地合成（早于本帧），只能经 GetSpeakerContinue() 读取。
+        std::lock_guard<std::mutex> lock(speaker_continue_mu_);
+        speaker_continue_ = resp.speaker_continue;
       }
 
       if (resp.code != 0) {

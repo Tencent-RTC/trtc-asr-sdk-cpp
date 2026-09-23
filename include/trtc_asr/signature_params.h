@@ -15,6 +15,11 @@ inline constexpr int kSpeakerDiarizationCluster = 1;
 /// Voiceprint role authentication; combine with SpeakerRoles / voiceprint IDs.
 inline constexpr int kSpeakerDiarizationVoiceprint = 3;
 
+/// 说话人分离断点续传（speaker context）模式：enable_speaker_context 参数。
+inline constexpr int kSpeakerContextOff = 0;
+inline constexpr int kSpeakerContextSync = 1;
+inline constexpr int kSpeakerContextAsync = 2;
+
 /// A temporary voiceprint enrollment entry used with speaker_diarization=3.
 /// role_name is echoed back by the server as speaker_name on matched words /
 /// speaker segments.
@@ -72,6 +77,13 @@ struct SignatureParams {
 
   /// 0 = off (default), 1 = anonymous clustering, 3 = voiceprint roles.
   int speaker_diarization = 0;
+
+  /// 说话人分离断点续传：0=off（默认），1=同步回报恢复状态，2=异步只回 id。
+  /// 需与 speaker_diarization 1/3 同开。
+  int enable_speaker_context = 0;
+
+  /// 上次会话签发的上下文 ID；仅与 enable_speaker_context 一起下发。
+  std::string speaker_context_id;
   /// Expected speaker count hint; 0 = auto detection (default).
   int speaker_number = 0;
   /// Only sent when speaker_diarization is 3.

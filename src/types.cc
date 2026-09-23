@@ -39,6 +39,12 @@ SpeechRecognitionResponse ParseSpeechResponseInner(const json& j) {
   resp.voice_id = j.value("voice_id", "");
   resp.message_id = j.value("message_id", "");
   resp.final_flag = j.value("final", 0);
+  if (j.contains("speaker_continue") && j["speaker_continue"].is_object()) {
+    const json& sc = j["speaker_continue"];
+    resp.speaker_continue = SpeakerContinue{
+        sc.value("continue_status", ""),
+        sc.value("speaker_context_id", "")};
+  }
 
   if (j.contains("result") && j["result"].is_object()) {
     resp.has_result = true;

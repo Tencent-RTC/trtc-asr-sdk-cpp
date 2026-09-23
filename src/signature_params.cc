@@ -95,6 +95,12 @@ std::map<std::string, std::string> SignatureParams::ToMap() const {
     std::snprintf(buf, sizeof(buf), "%.3f", *noise_threshold);
     m["noise_threshold"] = buf;
   }
+  if (enable_speaker_context != 0) {
+    m["enable_speaker_context"] = std::to_string(enable_speaker_context);
+    if (!speaker_context_id.empty()) {
+      m["speaker_context_id"] = speaker_context_id;
+    }
+  }
   if (speaker_diarization != 0) {
     m["speaker_diarization"] = std::to_string(speaker_diarization);
     if (speaker_number != 0) m["speaker_number"] = std::to_string(speaker_number);

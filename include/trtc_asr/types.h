@@ -64,6 +64,28 @@ struct RecognitionResult {
   int64_t last_token_runtime_ms = 0;
 };
 
+/// Speaker-context handshake result carried by the first response of a
+/// session that enabled the speaker context (v3
+/// SpeechRecognizer::SetEnableSpeakerContext). Absent when the session did
+/// not enable it.
+///
+/// Persist speaker_context_id on the client side and pass it back through
+/// SetSpeakerContextId when reconnecting within its lifetime (24h by
+/// default); the response of a later session is authoritative, so always
+/// overwrite the stored value. Wait for the first response before sending
+/// audio: in sync mode with a stored id the server answers only after the
+/// stored snapshot has been applied.
+struct SpeakerContinue {
+  /// fresh / resumed / degraded / disabled (see v3::kContinueStatus*). Empty
+  /// in async mode, where the server answers before the snapshot is loaded;
+  /// unknown values mean "no information".
+  std::string continue_status;
+  /// Opaque id of this speaker session; pass it back to resume the same
+  /// speaker identities. It is not a credential and is scoped to the
+  /// SdkAppID that issued it.
+  std::string speaker_context_id;
+};
+
 /// A response message from the ASR service (realtime WebSocket protocol).
 struct SpeechRecognitionResponse {
   int code = 0;
@@ -76,6 +98,9 @@ struct SpeechRecognitionResponse {
   /// Whether the raw frame carried a "result" object. The connection ack
   /// frame does not, and must not be dispatched as a sentence begin.
   bool has_result = false;
+  /// Speaker-context result of the first response; nullopt unless the
+  /// session enabled the speaker context (v2 query / v3 start-frame).
+  std::optional<SpeakerContinue> speaker_continue;
 };
 
 /// Parses a realtime response frame. Throws ASRError (kErrReadFailed) on

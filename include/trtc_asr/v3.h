@@ -56,6 +56,23 @@ constexpr int kSpeakerDiarizationOff = 0;
 constexpr int kSpeakerDiarizationCluster = 1;
 constexpr int kSpeakerDiarizationVoiceprint = 3;
 
+/// Speaker-context ("断点续传") modes for enable_speaker_context. They turn
+/// speaker diarization into a resumable session: the server stores the stable
+/// speaker anchors and hands back an opaque speaker_context_id, which a later
+/// connection passes back to keep the same speakers on the same ids. Both
+/// modes require speaker diarization.
+constexpr int kSpeakerContextOff = 0;
+/// Sync: with a stored id the first response waits for the snapshot.
+constexpr int kSpeakerContextSync = 1;
+/// Async: the first response answers immediately (id only, no status).
+constexpr int kSpeakerContextAsync = 2;
+
+/// continue_status values of SpeakerContinue::continue_status.
+constexpr const char* kContinueStatusFresh = "fresh";
+constexpr const char* kContinueStatusResumed = "resumed";
+constexpr const char* kContinueStatusDegraded = "degraded";
+constexpr const char* kContinueStatusDisabled = "disabled";
+
 /// Wire size limit of the online start frame, mirroring the server.
 constexpr size_t kStartFrameMaxBytes = 64 * 1024;
 /// Wire size limit of one audio frame, mirroring the server.
@@ -63,6 +80,11 @@ constexpr size_t kStreamFrameMaxBytes = 256 * 1024;
 
 /// How long Start() waits for the server's start-frame acknowledgement.
 constexpr std::chrono::milliseconds kAckTimeout{5000};
+/// Replaces kAckTimeout while resuming a speaker context (sync mode + a
+/// stored speaker_context_id): the first response is delayed until the server
+/// has loaded the stored speaker snapshot and restored it in the diarization
+/// session.
+constexpr std::chrono::milliseconds kSpeakerContextAckTimeout{15000};
 
 /// Creates a credential for the v3 API: only SdkAppID + SecretKey are needed.
 Credential NewCredential(int64_t sdk_app_id, std::string secret_key);
@@ -238,6 +260,10 @@ void ValidateAudioURLs(int source_type, const std::string& url,
 void ValidateSpeakerDiarization(int mode, int speaker_number,
                                 const std::vector<SpeakerRole>& roles,
                                 const std::vector<std::string>& voiceprint_ids);
+/// Checks the speaker-context ("断点续传") options: enable_speaker_context
+/// accepts 0/1/2 and only means anything together with speaker diarization
+/// (the server ignores it otherwise).
+void ValidateSpeakerContext(int mode, int diarization);
 void ValidateEnumOption(const std::string& name, int value,
                         const std::vector<int>& allowed);
 void ValidateVadTuning(const std::optional<int>& vad_level,
@@ -294,6 +320,35 @@ class SpeechRecognizer {
   void SetVoiceprintIds(std::vector<std::string> ids) {
     voiceprint_ids_ = std::move(ids);
   }
+  /// Makes the speaker-diarization session resumable ("说话人分离断点续传")
+  /// and selects how the server reports the handshake:
+  ///
+  ///  * kSpeakerContextOff (0, default): nothing is saved or returned, and
+  ///    SetSpeakerContextId is ignored.
+  ///  * kSpeakerContextSync (1): the first response waits for the stored
+  ///    snapshot to be applied and reports the outcome through
+  ///    SpeakerContinue::continue_status.
+  ///  * kSpeakerContextAsync (2): the first response answers immediately with
+  ///    the speaker_context_id only (no status) — keeps reconnects fast.
+  ///
+  /// Requires SetSpeakerDiarization(1) or (3). See SpeakerContinue for the
+  /// reconnect workflow.
+  void SetEnableSpeakerContext(int mode) { enable_speaker_context_ = mode; }
+  /// Passes back the speaker_context_id returned by a previous session
+  /// (SpeakerContinue::speaker_context_id) so this session resumes the same
+  /// speaker identities instead of numbering speakers from scratch.
+  ///
+  /// Only effective together with SetEnableSpeakerContext(1) or (2). The
+  /// server ignores an expired or unknown id and starts a new session, so a
+  /// stale value does not fail the connection; always overwrite the stored id
+  /// with the one returned by the latest first response.
+  void SetSpeakerContextId(std::string id);
+  /// Speaker-context result carried by the first response; nullopt when the
+  /// session did not enable the speaker context. Available once Start()
+  /// returns; also delivered to OnRecognitionStart.
+  const std::optional<SpeakerContinue>& GetSpeakerContinue() const {
+    return speaker_continue_;
+  }
   void SetVoiceId(std::string id) { voice_id_ = std::move(id); }
   void SetLanguage(std::string lang) { language_ = std::move(lang); }
   void SetContext(Context context) { context_ = std::move(context); }
@@ -312,6 +367,10 @@ class SpeechRecognizer {
 
  private:
   void ValidateOptions() const;
+  /// How long the handshake waits for the first response. Resuming a speaker
+  /// context in sync mode makes the server apply the stored snapshot before
+  /// answering; every other case answers immediately.
+  std::chrono::milliseconds AckTimeout() const;
   void Connect();
   void ReadLoop();
   void ReadLoopInner(
@@ -353,6 +412,11 @@ class SpeechRecognizer {
   std::string voice_id_;
   std::string language_;
   std::optional<Context> context_;
+  // Speaker context ("断点续传"): requested mode (0/1/2), the id issued by an
+  // earlier session, and the handshake result of the first response.
+  int enable_speaker_context_ = 0;
+  std::string speaker_context_id_;
+  std::optional<SpeakerContinue> speaker_continue_;
 
   std::chrono::milliseconds write_timeout_{5000};
   std::chrono::milliseconds stop_timeout_{10000};

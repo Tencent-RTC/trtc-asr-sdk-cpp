@@ -179,6 +179,23 @@ class SpeechRecognizer {
   /// Speaker diarization: 0 off (default), 1 anonymous clustering,
   /// 3 voiceprint role authentication.
   void SetSpeakerDiarization(int mode) { speaker_diarization_ = mode; }
+
+  /// 说话人分离断点续传：0=off（默认），1=同步（首响应等快照并回报
+  /// continue_status），2=异步（首响应只回 id）。需与
+  /// SetSpeakerDiarization(1/3) 同开，否则 Start 本地报错。
+  void SetEnableSpeakerContext(int mode) { enable_speaker_context_ = mode; }
+
+  /// 传回上次会话的 speaker_context_id；过期/非法 ID 服务端按新会话处理。
+  /// 首尾空白会被去掉，与服务端 TrimSpace 一致。
+  void SetSpeakerContextId(std::string id);
+
+  /// 首响应携带的断点续传握手结果；未开启时为 std::nullopt。按值返回，
+  /// 可与读线程并发调用。注意 v2 的 OnRecognitionStart 在建连后本地合成
+  /// （早于服务端首响应），该值只能事后读取。
+  std::optional<SpeakerContinue> GetSpeakerContinue() const {
+    std::lock_guard<std::mutex> lock(speaker_continue_mu_);
+    return speaker_continue_;
+  }
   /// Expected speaker count hint. 0 = auto detection (default).
   void SetSpeakerNumber(int n) { speaker_number_ = n; }
   /// Temporary voiceprints; only used with voiceprint mode.
@@ -259,6 +276,12 @@ class SpeechRecognizer {
   int max_speak_time_ = 0;
   int input_sample_rate_ = 0;
   int speaker_diarization_ = 0;
+  int enable_speaker_context_ = 0;
+  std::string speaker_context_id_;
+  // Written by the reader thread, read by callers polling GetSpeakerContinue.
+  mutable std::mutex speaker_continue_mu_;
+  std::optional<SpeakerContinue> speaker_continue_;
+
   int speaker_number_ = 0;
   std::vector<SpeakerRole> speaker_roles_;
   std::vector<std::string> voiceprint_ids_;

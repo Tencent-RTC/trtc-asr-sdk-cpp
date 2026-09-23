@@ -1,5 +1,6 @@
 #include "trtc_asr/v3.h"
 
+#include <cctype>
 #include <cmath>
 
 #include "http_client.h"
@@ -139,6 +140,24 @@ void ValidateVadTuning(const std::optional<int>& vad_level,
     throw ASRError(kErrInvalidParam,
                    "NoiseThreshold must be between 0.0 and 4.0, got " +
                        std::to_string(*noise_threshold));
+  }
+}
+
+void ValidateSpeakerContext(int mode, int diarization) {
+  // enable_speaker_context accepts 0 (off), 1 (sync) or 2 (async); the server
+  // silently normalizes anything else to off, but a caller that meant to
+  // enable resumption is better served by an immediate error than by a
+  // session that quietly never returns a speaker_context_id.
+  if (mode != kSpeakerContextOff && mode != kSpeakerContextSync &&
+      mode != kSpeakerContextAsync) {
+    throw ASRError(kErrInvalidParam,
+                   "EnableSpeakerContext must be 0 (off), 1 (sync) or 2 (async), got " +
+                       std::to_string(mode));
+  }
+  // The server ignores the speaker-context parameters entirely when speaker
+  // diarization is off, so that combination is a caller mistake as well.
+  if (mode != kSpeakerContextOff && diarization == kSpeakerDiarizationOff) {
+    throw ASRError(kErrInvalidParam, "EnableSpeakerContext requires SpeakerDiarization=1 or 3");
   }
 }
 
@@ -676,6 +695,7 @@ void SpeechRecognizer::ValidateOptions() const {
   }
   internal::ValidateSpeakerDiarization(speaker_diarization_, speaker_number_, speaker_roles_,
                                        voiceprint_ids_);
+  internal::ValidateSpeakerContext(enable_speaker_context_, speaker_diarization_);
   internal::ValidateVadTuning(vad_level_, noise_threshold_);
   if (max_speak_time_ != 0 &&
       (max_speak_time_ < kMinMaxSpeakTime || max_speak_time_ > kMaxMaxSpeakTime)) {
@@ -768,6 +788,12 @@ void SpeechRecognizer::Connect() {
       params["speaker_roles"] = std::move(arr);
     }
   }
+  // Speaker context ("断点续传") is only sent when the caller opted in; the
+  // mode/diarization combination is validated locally.
+  if (enable_speaker_context_ != 0) {
+    params["enable_speaker_context"] = enable_speaker_context_;
+    if (!speaker_context_id_.empty()) params["speaker_context_id"] = speaker_context_id_;
+  }
   if (context_.has_value()) {
     nlohmann::json c;
     if (!context_->text.empty()) c["text"] = context_->text;
@@ -823,7 +849,7 @@ void SpeechRecognizer::Connect() {
 
   // Wait for the ack. A failure arrives as a structured error frame
   // ({code,message,voice_id}) followed by a normal close.
-  const auto deadline = std::chrono::steady_clock::now() + kAckTimeout;
+  const auto deadline = std::chrono::steady_clock::now() + AckTimeout();
   while (true) {
     v2internal::WsFrame f;
     std::string read_err;
@@ -858,10 +884,35 @@ void SpeechRecognizer::Connect() {
       shared_->Close();
       throw ASRError(static_cast<int>(code), ack.value("message", ""));
     }
+    // speaker_continue is present only when the session enabled the speaker
+    // context; it carries the id to persist for a later resume.
+    if (ack.contains("speaker_continue") && ack["speaker_continue"].is_object()) {
+      const auto& sc = ack["speaker_continue"];
+      SpeakerContinue parsed;
+      parsed.continue_status = sc.value("continue_status", "");
+      parsed.speaker_context_id = sc.value("speaker_context_id", "");
+      speaker_continue_ = std::move(parsed);
+    }
     // The ack frame never carries a result per the protocol; a defensive
     // ack-with-result is consumed here.
     return;
   }
+}
+
+std::chrono::milliseconds SpeechRecognizer::AckTimeout() const {
+  if (enable_speaker_context_ == kSpeakerContextSync && !speaker_context_id_.empty()) {
+    return kSpeakerContextAckTimeout;
+  }
+  return kAckTimeout;
+}
+
+void SpeechRecognizer::SetSpeakerContextId(std::string id) {
+  // Trim like the server does, so a stray newline from a persisted id does
+  // not turn the resume into a silent "new session".
+  const auto is_space = [](unsigned char c) { return std::isspace(c) != 0; };
+  while (!id.empty() && is_space(static_cast<unsigned char>(id.front()))) id.erase(id.begin());
+  while (!id.empty() && is_space(static_cast<unsigned char>(id.back()))) id.pop_back();
+  speaker_context_id_ = std::move(id);
 }
 
 void SpeechRecognizer::Start() {
@@ -1005,6 +1056,9 @@ void SpeechRecognizer::ReadLoopInner(
   start_resp.code = 0;
   start_resp.message = "success";
   start_resp.voice_id = voice_id_;
+  // The ack itself is consumed by Connect; re-attach the speaker context it
+  // carried so callback-style callers see the id/status.
+  start_resp.speaker_continue = speaker_continue_;
   listener_->OnRecognitionStart(start_resp);
 
   std::shared_ptr<v2internal::WsClient> conn;
