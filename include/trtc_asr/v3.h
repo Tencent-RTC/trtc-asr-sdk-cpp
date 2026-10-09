@@ -98,22 +98,6 @@ class SpeakerRole {
   std::string audio_url;
 };
 
-/// A domain key-value pair of Context::general.
-struct ContextKV {
-  std::string key;
-  std::string value;
-};
-
-/// Recognition context, aligned with Soniox / Volcengine semantics. LLM-class
-/// engines can consume all parts; traditional engines degrade terms to
-/// hotwords and ignore text/general.
-class Context {
- public:
-  std::string text;
-  std::vector<std::string> terms;
-  std::vector<ContextKV> general;
-};
-
 /// One audio piece of a distributed recording task.
 class AudioURLItem {
  public:
@@ -146,7 +130,6 @@ class TranscribeRequest {
   std::string language;
   int speaker_diarization = 0;
   int speaker_number = 0;
-  std::optional<Context> context;
 
   /// Validates the required/conditional fields and local ranges.
   void Validate() const;
@@ -208,7 +191,6 @@ class CreateTranscriptionRequest {
   std::optional<int> vad_level;
   std::optional<double> noise_threshold;
   std::string language;
-  std::optional<Context> context;
 
   void Validate() const;
 };
@@ -351,7 +333,6 @@ class SpeechRecognizer {
   }
   void SetVoiceId(std::string id) { voice_id_ = std::move(id); }
   void SetLanguage(std::string lang) { language_ = std::move(lang); }
-  void SetContext(Context context) { context_ = std::move(context); }
   void SetWriteTimeout(std::chrono::milliseconds timeout);
   void SetStopTimeout(std::chrono::milliseconds timeout);
 
@@ -411,7 +392,6 @@ class SpeechRecognizer {
   std::vector<std::string> voiceprint_ids_;
   std::string voice_id_;
   std::string language_;
-  std::optional<Context> context_;
   // Speaker context ("断点续传"): requested mode (0/1/2), the id issued by an
   // earlier session, and the handshake result of the first response.
   int enable_speaker_context_ = 0;

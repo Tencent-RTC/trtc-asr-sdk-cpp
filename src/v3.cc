@@ -256,22 +256,6 @@ nlohmann::json TranscribeRequestToWire(const TranscribeRequest& req) {
     d["speaker_diarization"] = req.speaker_diarization;
     if (req.speaker_number != 0) d["speaker_number"] = req.speaker_number;
   }
-  if (req.context.has_value()) {
-    nlohmann::json c;
-    if (!req.context->text.empty()) c["text"] = req.context->text;
-    if (!req.context->terms.empty()) c["terms"] = req.context->terms;
-    if (!req.context->general.empty()) {
-      nlohmann::json arr = nlohmann::json::array();
-      for (const auto& kv : req.context->general) {
-        nlohmann::json obj;
-        obj["key"] = kv.key;
-        obj["value"] = kv.value;
-        arr.push_back(std::move(obj));
-      }
-      c["general"] = std::move(arr);
-    }
-    if (!c.empty()) d["context"] = std::move(c);
-  }
   return d;
 }
 
@@ -444,22 +428,6 @@ nlohmann::json CreateTranscriptionRequestToWire(const CreateTranscriptionRequest
   if (req.vad_level.has_value()) d["vad_level"] = *req.vad_level;
   if (req.noise_threshold.has_value()) d["noise_threshold"] = *req.noise_threshold;
   if (!req.language.empty()) d["language"] = req.language;
-  if (req.context.has_value()) {
-    nlohmann::json c;
-    if (!req.context->text.empty()) c["text"] = req.context->text;
-    if (!req.context->terms.empty()) c["terms"] = req.context->terms;
-    if (!req.context->general.empty()) {
-      nlohmann::json arr = nlohmann::json::array();
-      for (const auto& kv : req.context->general) {
-        nlohmann::json obj;
-        obj["key"] = kv.key;
-        obj["value"] = kv.value;
-        arr.push_back(std::move(obj));
-      }
-      c["general"] = std::move(arr);
-    }
-    if (!c.empty()) d["context"] = std::move(c);
-  }
   return d;
 }
 
@@ -793,22 +761,6 @@ void SpeechRecognizer::Connect() {
   if (enable_speaker_context_ != 0) {
     params["enable_speaker_context"] = enable_speaker_context_;
     if (!speaker_context_id_.empty()) params["speaker_context_id"] = speaker_context_id_;
-  }
-  if (context_.has_value()) {
-    nlohmann::json c;
-    if (!context_->text.empty()) c["text"] = context_->text;
-    if (!context_->terms.empty()) c["terms"] = context_->terms;
-    if (!context_->general.empty()) {
-      nlohmann::json arr = nlohmann::json::array();
-      for (const auto& kv : context_->general) {
-        nlohmann::json obj;
-        obj["key"] = kv.key;
-        obj["value"] = kv.value;
-        arr.push_back(std::move(obj));
-      }
-      c["general"] = std::move(arr);
-    }
-    if (!c.empty()) params["context"] = std::move(c);
   }
 
   nlohmann::json auth;

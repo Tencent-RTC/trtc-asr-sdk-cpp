@@ -16,7 +16,6 @@ namespace {
 using trtc_asr::ASRError;
 using trtc_asr::SpeechRecognitionResponse;
 using trtc_asr::v3::AudioURLItem;
-using trtc_asr::v3::Context;
 using trtc_asr::v3::CreateTranscriptionRequest;
 using trtc_asr::v3::FileRecognizer;
 using trtc_asr::v3::NewCredential;
@@ -136,11 +135,6 @@ TEST(V3SpeechRecognizer, StartFrameWireFormat) {
   r.SetVoiceprintIds({"vp-1"});
   r.SetEnableSpeakerContext(trtc_asr::v3::kSpeakerContextSync);
   r.SetSpeakerContextId(kContextId);
-  Context ctx;
-  ctx.text = "bg";
-  ctx.terms = {"ASR"};
-  ctx.general = {trtc_asr::v3::ContextKV{"domain", "Meeting"}};
-  r.SetContext(ctx);
 
   EXPECT_NO_THROW(r.Start());
   EXPECT_NO_THROW(r.Write(std::vector<uint8_t>(1280, 0)));
@@ -178,12 +172,7 @@ TEST(V3SpeechRecognizer, StartFrameWireFormat) {
             nlohmann::json::array(
                 {nlohmann::json{{"role_name", "teacher"},
                                 {"audio_url", "https://example.com/t.wav"}}}));
-  const nlohmann::json want_context = {
-      {"text", "bg"},
-      {"terms", nlohmann::json::array({"ASR"})},
-      {"general",
-       nlohmann::json::array({nlohmann::json{{"key", "domain"}, {"value", "Meeting"}}})}};
-  EXPECT_EQ(params["context"], want_context);
+  EXPECT_FALSE(params.contains("context"));
   EXPECT_EQ(params["sdk_info"]["sdk_lang"], "cpp");
 }
 
@@ -463,6 +452,7 @@ TEST(V3Transcribe, WireFormatAndErrorMapping) {
     EXPECT_EQ(params["needvad"], 0);  // explicit 0 honored
     EXPECT_EQ(params["language"], "zh");
     EXPECT_EQ(params["sdk_info"]["sdk_lang"], "cpp");
+    EXPECT_FALSE(params.contains("context"));
     for (const char* bad : {"EngSerViceType", "SourceType", "VoiceFormat"}) {
       EXPECT_FALSE(params.contains(bad));
     }
